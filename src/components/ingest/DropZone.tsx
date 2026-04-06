@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { Upload, FileText, X } from "lucide-react";
 import IngestStatus from "./IngestStatus";
+import { useLLMStore } from "@/stores/llm-store";
 
 interface DropZoneProps {
   onClose: () => void;
@@ -54,6 +55,8 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
     if (selected) setFile(selected);
   };
 
+  const { getConfig } = useLLMStore();
+
   const handleIngest = async () => {
     if (!file) return;
     setIsIngesting(true);
@@ -68,6 +71,7 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
           fileName: file.name,
           content,
           fileType,
+          llmConfig: getConfig(),
         }),
       });
 

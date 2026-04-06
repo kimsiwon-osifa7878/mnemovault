@@ -1,4 +1,4 @@
-import { callClaude } from "./client";
+import { callLLM, LLMConfig } from "./client";
 import { readFile, writeFile, listFiles } from "@/lib/storage/fs";
 import { parseWikiPage } from "@/lib/wiki/parser";
 import { generateIndexContent } from "@/lib/wiki/index-manager";
@@ -36,7 +36,7 @@ const INGEST_SYSTEM_PROMPT = `당신은 지식 위키 컴파일러입니다. 주
 - 출처를 반드시 명시
 - JSON만 출력하세요. 다른 텍스트는 포함하지 마세요.`;
 
-export async function runIngest(req: IngestRequest): Promise<IngestResponse> {
+export async function runIngest(req: IngestRequest, llmConfig?: LLMConfig): Promise<IngestResponse> {
   const hash = sha256(req.content);
 
   // Check if already processed
@@ -53,9 +53,11 @@ export async function runIngest(req: IngestRequest): Promise<IngestResponse> {
   }
 
   // Call LLM
-  const llmResponse = await callClaude(
+  const llmResponse = await callLLM(
     INGEST_SYSTEM_PROMPT,
-    `파일명: ${req.fileName}\n파일 타입: ${req.fileType}\n\n내용:\n${req.content}`
+    `파일명: ${req.fileName}\n파일 타입: ${req.fileType}\n\n내용:\n${req.content}`,
+    4096,
+    llmConfig
   );
 
   let parsed;

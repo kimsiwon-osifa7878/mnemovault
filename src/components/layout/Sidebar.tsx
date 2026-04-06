@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useWikiStore } from "@/stores/wiki-store";
+import { useLLMStore } from "@/stores/llm-store";
 import {
   FileText,
   FolderOpen,
@@ -16,6 +17,7 @@ interface SidebarProps {
   onPageSelect: (slug: string) => void;
   onIngestClick: () => void;
   onNewPage: () => void;
+  onSettingsClick?: () => void;
 }
 
 interface TreeSection {
@@ -28,8 +30,10 @@ export default function Sidebar({
   onPageSelect,
   onIngestClick,
   onNewPage,
+  onSettingsClick,
 }: SidebarProps) {
   const { pages, currentSlug, fetchPages } = useWikiStore();
+  const { provider, ollamaModel, claudeModel } = useLLMStore();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["concepts", "entities", "sources", "analyses"])
   );
@@ -183,6 +187,20 @@ export default function Sidebar({
 
       {/* Actions */}
       <div className="p-2 border-t border-white/10 space-y-1">
+        {/* Provider indicator */}
+        <button
+          onClick={onSettingsClick}
+          className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-xs bg-white/[0.02] text-white/40 hover:bg-white/5 hover:text-white/60 mb-1"
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              provider === "ollama" ? "bg-emerald-400" : "bg-blue-400"
+            }`}
+          />
+          <span className="truncate">
+            {provider === "ollama" ? `Ollama · ${ollamaModel}` : `Claude · ${claudeModel.split("-").slice(0, 2).join(" ")}`}
+          </span>
+        </button>
         <button
           onClick={onNewPage}
           className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-xs bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"

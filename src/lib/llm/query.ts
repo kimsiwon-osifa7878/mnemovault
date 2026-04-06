@@ -1,4 +1,4 @@
-import { callClaude } from "./client";
+import { callLLM, LLMConfig } from "./client";
 import { readFile, writeFile, listFiles } from "@/lib/storage/fs";
 import { parseWikiPage, parseWikilinks } from "@/lib/wiki/parser";
 import { appendLogEntry } from "@/lib/wiki/log-manager";
@@ -15,7 +15,7 @@ const QUERY_SYSTEM_PROMPT = `당신은 위키 기반 지식 어시스턴트입�
 - 위키에 없는 정보는 명확히 구분하여 표시
 - 마크다운 형식으로 답변`;
 
-export async function runQuery(req: QueryRequest): Promise<QueryResponse> {
+export async function runQuery(req: QueryRequest, llmConfig?: LLMConfig): Promise<QueryResponse> {
   // Build context from wiki
   const allFiles = await listFiles("wiki");
   const pages: WikiPage[] = [];
@@ -58,9 +58,11 @@ export async function runQuery(req: QueryRequest): Promise<QueryResponse> {
     context += `## ${page.frontmatter.title} (${page.frontmatter.type})\n${page.content.slice(0, 300)}\n\n`;
   }
 
-  const answer = await callClaude(
+  const answer = await callLLM(
     QUERY_SYSTEM_PROMPT,
-    `위키 컨텍스트:\n${context}\n\n질문: ${req.question}`
+    `위키 컨텍스트:\n${context}\n\n질문: ${req.question}`,
+    4096,
+    llmConfig
   );
 
   // Extract citations

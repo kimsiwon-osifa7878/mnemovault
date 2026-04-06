@@ -1,10 +1,10 @@
-import { callClaude } from "./client";
+import { callLLM, LLMConfig } from "./client";
 import { readFile, listFiles } from "@/lib/storage/fs";
 import { parseWikiPage, parseWikilinks } from "@/lib/wiki/parser";
 import { toSlug } from "@/lib/utils/markdown";
 import { LintIssue, LintResponse, WikiPage } from "@/types/wiki";
 
-export async function runLint(): Promise<LintResponse> {
+export async function runLint(llmConfig?: LLMConfig): Promise<LintResponse> {
   const allFiles = await listFiles("wiki");
   const pages: WikiPage[] = [];
   for (const f of allFiles) {
@@ -70,10 +70,11 @@ export async function runLint(): Promise<LintResponse> {
         .map((p) => `### ${p.frontmatter.title}\n${p.content.slice(0, 200)}`)
         .join("\n\n");
 
-      const llmResponse = await callClaude(
+      const llmResponse = await callLLM(
         `위키 페이지들을 분석하여 모순이나 불일치를 찾으세요. JSON 배열로 응답: [{"description": "모순 설명", "pages": ["page1", "page2"]}]. 모순이 없으면 빈 배열 [] 을 반환하세요.`,
         summaries,
-        2048
+        2048,
+        llmConfig
       );
 
       const jsonMatch = llmResponse.match(/\[[\s\S]*\]/);

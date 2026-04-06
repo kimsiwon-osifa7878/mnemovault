@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, AlertTriangle, Loader2, CheckCircle } from "lucide-react";
 import { LintIssue } from "@/types/wiki";
+import { useLLMStore } from "@/stores/llm-store";
 
 interface LintPanelProps {
   onClose: () => void;
@@ -12,11 +13,16 @@ export default function LintPanel({ onClose }: LintPanelProps) {
   const [issues, setIssues] = useState<LintIssue[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [hasRun, setHasRun] = useState(false);
+  const { getConfig } = useLLMStore();
 
   const runLint = async () => {
     setIsRunning(true);
     try {
-      const res = await fetch("/api/lint", { method: "POST" });
+      const res = await fetch("/api/lint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ llmConfig: getConfig() }),
+      });
       if (!res.ok) throw new Error("Lint failed");
       const data = await res.json();
       setIssues(data.issues);

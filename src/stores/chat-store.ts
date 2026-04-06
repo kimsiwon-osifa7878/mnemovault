@@ -8,13 +8,19 @@ export interface ChatMessage {
   timestamp: Date;
 }
 
+interface LLMConfig {
+  provider: "claude" | "ollama";
+  model: string;
+  ollamaUrl?: string;
+}
+
 interface ChatState {
   messages: ChatMessage[];
   isLoading: boolean;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
   setLoading: (loading: boolean) => void;
   clearMessages: () => void;
-  sendQuery: (question: string, currentDocument?: string, fileAsPage?: boolean) => Promise<void>;
+  sendQuery: (question: string, currentDocument?: string, fileAsPage?: boolean, llmConfig?: LLMConfig) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -33,7 +39,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   clearMessages: () => set({ messages: [] }),
 
-  sendQuery: async (question, currentDocument, fileAsPage) => {
+  sendQuery: async (question, currentDocument, fileAsPage, llmConfig) => {
     const { addMessage } = get();
     addMessage({ role: "user", content: question });
     set({ isLoading: true });
@@ -42,7 +48,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, currentDocument, fileAsPage }),
+        body: JSON.stringify({ question, currentDocument, fileAsPage, llmConfig }),
       });
       if (!res.ok) throw new Error("Query failed");
       const data = await res.json();

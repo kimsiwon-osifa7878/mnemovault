@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useChatStore } from "@/stores/chat-store";
 import { useWikiStore } from "@/stores/wiki-store";
+import { useLLMStore } from "@/stores/llm-store";
 import WikiRenderer from "@/components/markdown/WikiRenderer";
 import { Send, Trash2, BookmarkPlus, Loader2 } from "lucide-react";
 
@@ -13,6 +14,7 @@ interface ChatPaneProps {
 export default function ChatPane({ onLinkClick }: ChatPaneProps) {
   const { messages, isLoading, sendQuery, clearMessages } = useChatStore();
   const { currentSlug } = useWikiStore();
+  const { getConfig } = useLLMStore();
   const [input, setInput] = useState("");
   const [fileAsPage, setFileAsPage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -26,7 +28,7 @@ export default function ChatPane({ onLinkClick }: ChatPaneProps) {
     if (!input.trim() || isLoading) return;
     const question = input.trim();
     setInput("");
-    await sendQuery(question, currentSlug || undefined, fileAsPage);
+    await sendQuery(question, currentSlug || undefined, fileAsPage, getConfig());
   };
 
   return (

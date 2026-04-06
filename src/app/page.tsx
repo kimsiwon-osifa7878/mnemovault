@@ -8,16 +8,20 @@ import GraphView from "@/components/graph/GraphView";
 import DropZone from "@/components/ingest/DropZone";
 import NewPageModal from "@/components/NewPageModal";
 import LintPanel from "@/components/LintPanel";
+import LLMSettings from "@/components/LLMSettings";
 import { useWikiStore } from "@/stores/wiki-store";
 import { useGraphStore } from "@/stores/graph-store";
-import { Network, AlertTriangle, PanelRightClose, PanelRight } from "lucide-react";
+import { useLLMStore } from "@/stores/llm-store";
+import { Network, AlertTriangle, PanelRightClose, PanelRight, Settings } from "lucide-react";
 
 export default function Home() {
   const { fetchPage, fetchPages, currentSlug } = useWikiStore();
   const { fetchGraph } = useGraphStore();
+  const { provider } = useLLMStore();
   const [showIngest, setShowIngest] = useState(false);
   const [showNewPage, setShowNewPage] = useState(false);
   const [showLint, setShowLint] = useState(false);
+  const [showLLMSettings, setShowLLMSettings] = useState(false);
   const [showGraph, setShowGraph] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [backlinks, setBacklinks] = useState<string[]>([]);
@@ -57,6 +61,7 @@ export default function Home() {
           onPageSelect={handlePageSelect}
           onIngestClick={() => setShowIngest(true)}
           onNewPage={() => setShowNewPage(true)}
+          onSettingsClick={() => setShowLLMSettings(true)}
         />
       </div>
 
@@ -97,6 +102,13 @@ export default function Home() {
               title="Run Lint"
             >
               <AlertTriangle className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setShowLLMSettings(true)}
+              className="px-2 py-2 text-white/30 hover:text-white/60"
+              title="LLM Settings"
+            >
+              <Settings className="w-3.5 h-3.5" />
             </button>
           </div>
 
@@ -142,6 +154,9 @@ export default function Home() {
         />
       )}
       {showLint && <LintPanel onClose={() => setShowLint(false)} />}
+      {showLLMSettings && (
+        <LLMSettings onClose={() => setShowLLMSettings(false)} />
+      )}
     </div>
   );
 }
