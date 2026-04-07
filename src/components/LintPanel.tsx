@@ -4,9 +4,62 @@ import { useState } from "react";
 import { X, AlertTriangle, Loader2, CheckCircle } from "lucide-react";
 import { LintIssue } from "@/types/wiki";
 import { useLLMStore } from "@/stores/llm-store";
+import { useStorageStore } from "@/stores/storage-store";
+import * as clientFs from "@/lib/storage/client-fs";
+import { parseWikiPage, parseWikilinks } from "@/lib/wiki/parser";
+import { toSlug } from "@/lib/utils/markdown";
 
 interface LintPanelProps {
   onClose: () => void;
+}
+
+async function runStaticLint(root: FileSystemDirectoryHandle): Promise<LintIssue[]> {
+  const issues: LintIssue[] = [];
+  const files = await clientFs.listFiles(root, "wiki");
+  const pages = [];
+
+  for (const f of files) {
+    try {
+      const raw = await clientFs.readFile(root, f);
+      const filename = f.split("/").pop() || f;
+      pages.push(parseWikiPage(filename, raw));
+    } catch { /* skip */ }
+  }
+
+  const slugSet = new Set(pages.map((p) => p.slug));
+  const linkedSlugs = new Set<string>();
+
+  // Check for missing pages (broken wikilinks) and collect linked slugs
+  for (const page of pages) {
+    const links = parseWikilinks(page.content);
+    for (const link of links) {
+      const targetSlug = toSlug(link.target);
+      linkedSlugs.add(targetSlug);
+      if (!slugSet.has(targetSlug)) {
+        issues.push({
+          type: "missing_page",
+          description: `[[${link.target}]] referenced in "${page.frontmatter.title}" does not exist`,
+          pages: [page.slug],
+          suggestion: `Create a page for "${link.target}"`,
+        });
+      }
+    }
+  }
+
+  // Check for orphan pages (no incoming links)
+  for (const page of pages) {
+    if (page.slug === "index" || page.slug === "log") continue;
+    if (!linkedSlugs.has(page.slug)) {
+      issues.push({
+        type: "orphan",
+        description: `"${page.frontmatter.title}" has no incoming links`,
+        pages: [page.slug],
+        suggestion: `Add a [[${page.frontmatter.title}]] reference from related pages`,
+      });
+    }
+  }
+
+  return issues;
 }
 
 export default function LintPanel({ onClose }: LintPanelProps) {
@@ -18,14 +71,53 @@ export default function LintPanel({ onClose }: LintPanelProps) {
   const runLint = async () => {
     setIsRunning(true);
     try {
-      const res = await fetch("/api/lint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ llmConfig: getConfig() }),
-      });
-      if (!res.ok) throw new Error("Lint failed");
-      const data = await res.json();
-      setIssues(data.issues);
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      // 1. Client-side static lint
+      const staticIssues = await runStaticLint(root);
+
+      // 2. Server-side LLM contradiction detection
+      let llmIssues: LintIssue[] = [];
+      try {
+        const files = await clientFs.listFiles(root, "wiki");
+        const summaries: string[] = [];
+        for (const f of files) {
+          try {
+            const raw = await clientFs.readFile(root, f);
+            const filename = f.split("/").pop() || f;
+            const page = parseWikiPage(filename, raw);
+            if (page.slug === "index" || page.slug === "log") continue;
+            summaries.push(`## ${page.frontmatter.title}\n${page.content.slice(0, 200)}`);
+          } catch { /* skip */ }
+        }
+
+        if (summaries.length > 0) {
+          const res = await fetch("/api/llm/lint", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pageSummaries: summaries.join("\n\n"),
+              llmConfig: getConfig(),
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            llmIssues = (data.contradictions || []).map(
+              (c: { description: string; pages: string[] }) => ({
+                type: "contradiction" as const,
+                description: c.description,
+                pages: c.pages || [],
+                suggestion: "Review and resolve the contradiction",
+              })
+            );
+          }
+        }
+      } catch {
+        // LLM lint is best-effort
+      }
+
+      setIssues([...staticIssues, ...llmIssues]);
       setHasRun(true);
     } catch {
       // handle error

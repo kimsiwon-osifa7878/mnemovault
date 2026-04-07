@@ -9,19 +9,22 @@ import DropZone from "@/components/ingest/DropZone";
 import NewPageModal from "@/components/NewPageModal";
 import LintPanel from "@/components/LintPanel";
 import LLMSettings from "@/components/LLMSettings";
+import StorageGuard from "@/components/StorageGuard";
+import StorageSettings from "@/components/StorageSettings";
 import { useWikiStore } from "@/stores/wiki-store";
 import { useGraphStore } from "@/stores/graph-store";
-import { useLLMStore } from "@/stores/llm-store";
+import { parseWikilinks } from "@/lib/wiki/parser";
+import { toSlug } from "@/lib/utils/markdown";
 import { Network, AlertTriangle, PanelRightClose, PanelRight, Settings } from "lucide-react";
 
-export default function Home() {
-  const { fetchPage, fetchPages, currentSlug } = useWikiStore();
+function IDELayout() {
+  const { fetchPage, fetchPages, currentSlug, pages } = useWikiStore();
   const { fetchGraph } = useGraphStore();
-  const { provider } = useLLMStore();
   const [showIngest, setShowIngest] = useState(false);
   const [showNewPage, setShowNewPage] = useState(false);
   const [showLint, setShowLint] = useState(false);
   const [showLLMSettings, setShowLLMSettings] = useState(false);
+  const [showStorageSettings, setShowStorageSettings] = useState(false);
   const [showGraph, setShowGraph] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [backlinks, setBacklinks] = useState<string[]>([]);
@@ -29,16 +32,20 @@ export default function Home() {
   const handlePageSelect = useCallback(
     async (slug: string) => {
       await fetchPage(slug);
-      // Fetch backlinks
-      try {
-        const res = await fetch(`/api/wiki/${slug}`);
-        if (res.ok) {
-          const data = await res.json();
-          setBacklinks(data.backlinks || []);
+      // Compute backlinks from loaded pages
+      const currentPages = useWikiStore.getState().pages;
+      const bl: string[] = [];
+      for (const p of currentPages) {
+        if (p.slug === slug) continue;
+        const links = parseWikilinks(p.content);
+        for (const link of links) {
+          if (toSlug(link.target) === slug) {
+            bl.push(p.slug);
+            break;
+          }
         }
-      } catch {
-        setBacklinks([]);
       }
+      setBacklinks(bl);
     },
     [fetchPage]
   );
@@ -49,7 +56,6 @@ export default function Home() {
   }, [fetchPages, fetchGraph]);
 
   useEffect(() => {
-    // Load index page by default
     handlePageSelect("index");
   }, [handlePageSelect]);
 
@@ -62,6 +68,7 @@ export default function Home() {
           onIngestClick={() => setShowIngest(true)}
           onNewPage={() => setShowNewPage(true)}
           onSettingsClick={() => setShowLLMSettings(true)}
+          onStorageClick={() => setShowStorageSettings(true)}
         />
       </div>
 
@@ -157,6 +164,17 @@ export default function Home() {
       {showLLMSettings && (
         <LLMSettings onClose={() => setShowLLMSettings(false)} />
       )}
+      {showStorageSettings && (
+        <StorageSettings onClose={() => setShowStorageSettings(false)} />
+      )}
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <StorageGuard>
+      <IDELayout />
+    </StorageGuard>
   );
 }

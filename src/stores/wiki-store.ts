@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { WikiPage } from "@/types/wiki";
+import { parseWikiPage } from "@/lib/wiki/parser";
+import * as clientFs from "@/lib/storage/client-fs";
+import { useStorageStore } from "./storage-store";
 
 interface WikiState {
   pages: WikiPage[];
@@ -33,10 +36,21 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   fetchPages: async () => {
     set({ isLoading: true, error: null });
     try {
-      const res = await fetch("/api/wiki");
-      if (!res.ok) throw new Error("Failed to fetch pages");
-      const data = await res.json();
-      set({ pages: data.pages, isLoading: false });
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      const files = await clientFs.listFiles(root, "wiki");
+      const pages: WikiPage[] = [];
+      for (const f of files) {
+        try {
+          const raw = await clientFs.readFile(root, f);
+          const filename = f.split("/").pop() || f;
+          pages.push(parseWikiPage(filename, raw));
+        } catch {
+          // skip unreadable files
+        }
+      }
+      set({ pages, isLoading: false });
     } catch (e) {
       set({ error: (e as Error).message, isLoading: false });
     }
@@ -45,10 +59,23 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   fetchPage: async (slug: string) => {
     set({ isLoading: true, error: null });
     try {
-      const res = await fetch(`/api/wiki/${slug}`);
-      if (!res.ok) throw new Error("Failed to fetch page");
-      const data = await res.json();
-      set({ currentPage: data.page, currentSlug: slug, isLoading: false });
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      // Search for the file matching this slug
+      const files = await clientFs.listFiles(root, "wiki");
+      const match = files.find((f) => {
+        const filename = f.split("/").pop() || f;
+        return filename.replace(/\.md$/, "") === slug;
+      });
+
+      if (!match) throw new Error(`Page not found: ${slug}`);
+
+      const raw = await clientFs.readFile(root, match);
+      const filename = match.split("/").pop() || match;
+      const page = parseWikiPage(filename, raw);
+
+      set({ currentPage: page, currentSlug: slug, isLoading: false });
     } catch (e) {
       set({ error: (e as Error).message, isLoading: false });
     }
@@ -57,14 +84,24 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   savePage: async (slug: string, content: string) => {
     set({ isLoading: true, error: null });
     try {
-      const res = await fetch(`/api/wiki/${slug}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      // Find the existing file path
+      const files = await clientFs.listFiles(root, "wiki");
+      const match = files.find((f) => {
+        const filename = f.split("/").pop() || f;
+        return filename.replace(/\.md$/, "") === slug;
       });
-      if (!res.ok) throw new Error("Failed to save page");
-      const data = await res.json();
-      set({ currentPage: data.page, isLoading: false });
+
+      if (!match) throw new Error(`Page not found: ${slug}`);
+
+      await clientFs.writeFile(root, match, content);
+
+      const filename = match.split("/").pop() || match;
+      const page = parseWikiPage(filename, content);
+      set({ currentPage: page, isLoading: false });
+
       // Refresh page list
       get().fetchPages();
     } catch (e) {
@@ -75,8 +112,18 @@ export const useWikiStore = create<WikiState>((set, get) => ({
   deletePage: async (slug: string) => {
     set({ isLoading: true, error: null });
     try {
-      const res = await fetch(`/api/wiki/${slug}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete page");
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      const files = await clientFs.listFiles(root, "wiki");
+      const match = files.find((f) => {
+        const filename = f.split("/").pop() || f;
+        return filename.replace(/\.md$/, "") === slug;
+      });
+
+      if (!match) throw new Error(`Page not found: ${slug}`);
+
+      await clientFs.deleteFile(root, match);
       set({ currentPage: null, currentSlug: null, isLoading: false });
       get().fetchPages();
     } catch (e) {

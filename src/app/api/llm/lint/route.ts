@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
-import { runIngest } from "@/lib/llm/ingest";
+import { detectContradictions } from "@/lib/llm/lint";
 import { LLMConfig } from "@/lib/llm/client";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fileName, content, fileType, llmConfig } = body;
+    const { pageSummaries, llmConfig } = body;
 
-    if (!fileName || !content || !fileType) {
+    if (!pageSummaries) {
       return NextResponse.json(
-        { error: "fileName, content, and fileType are required" },
+        { error: "pageSummaries is required" },
         { status: 400 }
       );
     }
@@ -18,8 +18,8 @@ export async function POST(request: Request) {
       ? { provider: llmConfig.provider, model: llmConfig.model, ollamaUrl: llmConfig.ollamaUrl }
       : undefined;
 
-    const result = await runIngest({ fileName, content, fileType }, config);
-    return NextResponse.json(result);
+    const contradictions = await detectContradictions(pageSummaries, config);
+    return NextResponse.json({ contradictions });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

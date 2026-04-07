@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWikiStore } from "@/stores/wiki-store";
 import { useLLMStore } from "@/stores/llm-store";
+import { useStorageStore } from "@/stores/storage-store";
 import {
   FileText,
   FolderOpen,
@@ -18,6 +19,7 @@ interface SidebarProps {
   onIngestClick: () => void;
   onNewPage: () => void;
   onSettingsClick?: () => void;
+  onStorageClick?: () => void;
 }
 
 interface TreeSection {
@@ -31,9 +33,11 @@ export default function Sidebar({
   onIngestClick,
   onNewPage,
   onSettingsClick,
+  onStorageClick,
 }: SidebarProps) {
   const { pages, currentSlug, fetchPages } = useWikiStore();
   const { provider, ollamaModel, claudeModel } = useLLMStore();
+  const { folderName } = useStorageStore();
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["concepts", "entities", "sources", "analyses"])
   );
@@ -187,6 +191,16 @@ export default function Sidebar({
 
       {/* Actions */}
       <div className="p-2 border-t border-white/10 space-y-1">
+        {/* Storage folder indicator */}
+        {folderName && (
+          <button
+            onClick={onStorageClick}
+            className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-xs bg-white/[0.02] text-white/40 hover:bg-white/5 hover:text-white/60 mb-1"
+          >
+            <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{folderName}</span>
+          </button>
+        )}
         {/* Provider indicator */}
         <button
           onClick={onSettingsClick}

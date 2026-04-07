@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
+import { useStorageStore } from "@/stores/storage-store";
+import * as clientFs from "@/lib/storage/client-fs";
+import { toSlug } from "@/lib/utils/markdown";
 
 interface NewPageModalProps {
   onClose: () => void;
@@ -17,14 +20,26 @@ export default function NewPageModal({ onClose, onCreated }: NewPageModalProps) 
     if (!title.trim()) return;
     setIsCreating(true);
     try {
-      const res = await fetch("/api/wiki", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), type, content: "", tags: [] }),
-      });
-      if (!res.ok) throw new Error("Failed to create page");
-      const data = await res.json();
-      onCreated(data.page.slug);
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      const slug = toSlug(title.trim());
+      const today = new Date().toISOString().split("T")[0];
+      const folder = type === "entity" ? "entities" : type === "concept" ? "concepts" : type === "source" ? "sources" : "analyses";
+      const content = `---
+title: "${title.trim()}"
+type: ${type}
+created: ${today}
+updated: ${today}
+tags: []
+confidence: medium
+---
+
+# ${title.trim()}
+
+`;
+      await clientFs.writeFile(root, `wiki/${folder}/${slug}.md`, content);
+      onCreated(slug);
     } catch {
       // handle error
     } finally {
