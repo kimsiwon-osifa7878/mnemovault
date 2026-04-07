@@ -11,7 +11,7 @@ export default function WikiPage() {
   useEffect(() => {
     // Redirect to main page with the slug as a query param
     // The main page handles all wiki viewing in the IDE layout
-    router.push(`/?page=${slug}`);
+    router.push(`/app?page=${slug}`);
   }, [slug, router]);
 
   return (
