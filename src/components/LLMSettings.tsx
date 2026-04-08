@@ -26,19 +26,31 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const [tempUrl, setTempUrl] = useState(ollamaUrl);
 
   const fetchOllamaModels = async (url: string) => {
+    // #region agent log
+    fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H4",location:"src/components/LLMSettings.tsx:29",message:"fetchOllamaModels called",data:{url,provider,origin:typeof window!=="undefined"?window.location.origin:"server"},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     setIsFetching(true);
     setOllamaStatus("unknown");
     try {
       const res = await fetch(`${url}/api/tags`);
+      // #region agent log
+      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H3",location:"src/components/LLMSettings.tsx:36",message:"ollama tags fetch response",data:{ok:res.ok,status:res.status,statusText:res.statusText,responseType:res.type},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!res.ok) throw new Error("Failed to connect");
       const data = await res.json();
       const models = (data.models || []).map((m: { name: string }) => m.name);
+      // #region agent log
+      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H5",location:"src/components/LLMSettings.tsx:42",message:"ollama models parsed",data:{modelCount:models.length,firstModel:models[0]||null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setOllamaModels(models);
       setOllamaStatus("connected");
       if (models.length > 0 && !models.includes(ollamaModel)) {
         setOllamaModel(models[0]);
       }
-    } catch {
+    } catch (error) {
+      // #region agent log
+      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H4",location:"src/components/LLMSettings.tsx:50",message:"fetchOllamaModels failed",data:{error:error instanceof Error?error.message:String(error),url},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setOllamaModels([]);
       setOllamaStatus("error");
     } finally {
@@ -54,6 +66,9 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   }, [provider]);
 
   const handleUrlApply = () => {
+    // #region agent log
+    fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H2-H4",location:"src/components/LLMSettings.tsx:67",message:"connect button apply url",data:{tempUrl,trimmedUrl:tempUrl.trim()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     setOllamaUrl(tempUrl);
     fetchOllamaModels(tempUrl);
   };
