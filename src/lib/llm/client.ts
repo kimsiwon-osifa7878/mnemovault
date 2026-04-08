@@ -8,7 +8,7 @@ export interface LLMConfig {
 
 const DEFAULT_CONFIG: LLMConfig = {
   provider: "claude",
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-6",
 };
 
 let anthropicClient: Anthropic | null = null;

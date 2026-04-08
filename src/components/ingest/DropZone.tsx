@@ -4,6 +4,12 @@ import { useState, useCallback } from "react";
 import { Upload, FileText, X } from "lucide-react";
 import IngestStatus from "./IngestStatus";
 import { useLLMStore } from "@/stores/llm-store";
+import { useStorageStore } from "@/stores/storage-store";
+import * as clientFs from "@/lib/storage/client-fs";
+import { toSlug } from "@/lib/utils/markdown";
+import { parseWikiPage } from "@/lib/wiki/parser";
+import { generateIndexContent } from "@/lib/wiki/index-manager";
+import { appendLogEntry } from "@/lib/wiki/log-manager";
 
 interface DropZoneProps {
   onClose: () => void;
@@ -63,8 +69,17 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
     setError(null);
 
     try {
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
       const content = await file.text();
-      const res = await fetch("/api/ingest", {
+
+      // Save raw file
+      const rawPath = `raw/${fileType}s/${file.name}`;
+      await clientFs.writeFile(root, rawPath, content);
+
+      // Call server for LLM processing only
+      const res = await fetch("/api/llm/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,8 +91,125 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
       });
 
       if (!res.ok) throw new Error("Ingest failed");
-      const data = await res.json();
-      setResult(data);
+      const llmResult = await res.json();
+
+      const created: string[] = [];
+      const today = new Date().toISOString().split("T")[0];
+
+      // Persist source summary
+      const sourceSlug = toSlug(llmResult.summary.title || file.name.replace(/\.\w+$/, ""));
+      const sourceContent = `---
+title: "${llmResult.summary.title}"
+type: source
+created: ${today}
+updated: ${today}
+sources:
+  - ${rawPath}
+tags: [${(llmResult.tags || []).map((t: string) => `"${t}"`).join(", ")}]
+confidence: medium
+---
+
+# ${llmResult.summary.title}
+
+${llmResult.summary.content}
+
+## Key Takeaways
+
+${(llmResult.summary.key_takeaways || []).map((k: string) => `- ${k}`).join("\n")}
+`;
+      await clientFs.writeFile(root, `wiki/sources/${sourceSlug}.md`, sourceContent);
+      created.push(sourceSlug);
+
+      // Persist concept pages
+      for (const concept of llmResult.concepts || []) {
+        const slug = toSlug(concept.name);
+        const pageContent = `---
+title: "${concept.name}"
+type: concept
+created: ${today}
+updated: ${today}
+sources:
+  - ${rawPath}
+tags: [${(llmResult.tags || []).map((t: string) => `"${t}"`).join(", ")}]
+confidence: medium
+---
+
+# ${concept.name}
+
+${concept.content}
+
+## Sources
+
+- [[${llmResult.summary.title}]]
+`;
+        await clientFs.writeFile(root, `wiki/concepts/${slug}.md`, pageContent);
+        created.push(slug);
+      }
+
+      // Persist entity pages
+      for (const entity of llmResult.entities || []) {
+        const slug = toSlug(entity.name);
+        const pageContent = `---
+title: "${entity.name}"
+type: entity
+created: ${today}
+updated: ${today}
+sources:
+  - ${rawPath}
+tags: [${(llmResult.tags || []).map((t: string) => `"${t}"`).join(", ")}]
+confidence: medium
+---
+
+# ${entity.name}
+
+${entity.content}
+
+## Sources
+
+- [[${llmResult.summary.title}]]
+`;
+        await clientFs.writeFile(root, `wiki/entities/${slug}.md`, pageContent);
+        created.push(slug);
+      }
+
+      // Update index.md
+      try {
+        const allFiles = await clientFs.listFiles(root, "wiki");
+        const allPages = [];
+        for (const f of allFiles) {
+          try {
+            const raw = await clientFs.readFile(root, f);
+            const filename = f.split("/").pop() || f;
+            allPages.push(parseWikiPage(filename, raw));
+          } catch { /* skip */ }
+        }
+        const indexContent = generateIndexContent(allPages);
+        await clientFs.writeFile(root, "wiki/index.md", indexContent);
+      } catch { /* best effort */ }
+
+      // Update log.md
+      try {
+        const logRaw = await clientFs.readFile(root, "wiki/log.md");
+        const newLog = appendLogEntry(logRaw, "ingest", file.name, [
+          `Created: ${created.map((c) => `[[${c}]]`).join(", ")}`,
+          `Source type: ${fileType}`,
+        ]);
+        await clientFs.writeFile(root, "wiki/log.md", newLog);
+      } catch { /* best effort */ }
+
+      // Update processed_files.json
+      try {
+        const processed = await clientFs.readJsonFile(root, "meta/processed_files.json");
+        processed[file.name] = today;
+        await clientFs.writeFile(root, "meta/processed_files.json", JSON.stringify(processed, null, 2));
+      } catch { /* best effort */ }
+
+      setResult({
+        success: true,
+        created,
+        updated: [],
+        logEntry: `Ingested ${file.name}: created ${created.length} pages`,
+      });
       onComplete();
     } catch (e) {
       setError((e as Error).message);
