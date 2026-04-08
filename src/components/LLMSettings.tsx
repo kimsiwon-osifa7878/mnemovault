@@ -115,9 +115,9 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                 onChange={(e) => setClaudeModel(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 focus:border-blue-500/50 focus:outline-none"
               >
-                <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+                <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
                 <option value="claude-opus-4-6">Claude Opus 4.6</option>
+                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
               </select>
             </div>
             <p className="text-[10px] text-white/30">
@@ -186,7 +186,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   type="text"
                   value={ollamaModel}
                   onChange={(e) => setOllamaModel(e.target.value)}
-                  placeholder="llama3"
+                  placeholder="gemma4:e4b"
                   className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
                 />
               )}

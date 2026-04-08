@@ -22,8 +22,8 @@ export const useLLMStore = create<LLMState>()(
   persist(
     (set, get) => ({
       provider: "claude",
-      claudeModel: "claude-sonnet-4-20250514",
-      ollamaModel: "llama3",
+      claudeModel: "claude-sonnet-4-6",
+      ollamaModel: "gemma4:e4b",
       ollamaUrl: "http://localhost:11434",
 
       setProvider: (provider) => set({ provider }),
