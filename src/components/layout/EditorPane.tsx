@@ -14,9 +14,11 @@ type ViewMode = "edit" | "preview" | "split";
 interface EditorPaneProps {
   backlinks: string[];
   onLinkClick: (slug: string) => void;
+  onSave?: () => void;
+  onDelete?: () => void;
 }
 
-export default function EditorPane({ backlinks, onLinkClick }: EditorPaneProps) {
+export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }: EditorPaneProps) {
   const { currentPage, currentSlug, savePage, deletePage, isLoading } =
     useWikiStore();
   const [mode, setMode] = useState<ViewMode>("preview");
@@ -34,14 +36,16 @@ export default function EditorPane({ backlinks, onLinkClick }: EditorPaneProps) 
     if (currentSlug && editContent) {
       await savePage(currentSlug, editContent);
       setHasChanges(false);
+      onSave?.();
     }
-  }, [currentSlug, editContent, savePage]);
+  }, [currentSlug, editContent, savePage, onSave]);
 
   const handleDelete = useCallback(async () => {
     if (currentSlug && confirm("Are you sure you want to delete this page?")) {
       await deletePage(currentSlug);
+      onDelete?.();
     }
-  }, [currentSlug, deletePage]);
+  }, [currentSlug, deletePage, onDelete]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
