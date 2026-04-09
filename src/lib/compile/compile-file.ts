@@ -135,6 +135,11 @@ export async function compileFile(
     }
 
     if (!content.trim()) {
+      if (file.fileName.toLowerCase().endsWith(".pdf")) {
+        throw new Error(
+          "이 PDF는 추출 가능한 텍스트가 없습니다. 이미지로만 구성된 PDF로 보이며, OCR 처리가 필요합니다."
+        );
+      }
       throw new Error("No text content could be extracted from the file");
     }
 
