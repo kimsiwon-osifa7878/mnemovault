@@ -78,10 +78,15 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Configure D3 forces whenever graph data actually changes
+  // Update force graph whenever graph data actually changes
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg || stableGraphData.nodes.length === 0) return;
+
+    // Explicitly push data via imperative API to guarantee the update
+    // propagates even if the React prop change detection in the
+    // dynamic-imported react-force-graph-2d wrapper is unreliable.
+    fg.graphData(stableGraphData);
 
     const n = stableGraphData.nodes.length;
 
