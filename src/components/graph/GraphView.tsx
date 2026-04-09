@@ -36,8 +36,18 @@ interface NodeObject {
   y?: number;
 }
 
+interface ForceGraphInstance {
+  graphData: (data: { nodes: unknown[]; links: unknown[] }) => void;
+  d3Force: (name: string) => {
+    strength?: (value: number) => void;
+    distance?: (value: number) => void;
+  } | null;
+  d3ReheatSimulation: () => void;
+  zoomToFit: (ms?: number, padding?: number) => void;
+}
+
 export default function GraphView({ onNodeClick }: GraphViewProps) {
-  const { graphData, fetchGraph, selectedNode, setSelectedNode } = useGraphStore();
+  const { graphData, selectedNode, setSelectedNode } = useGraphStore();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
@@ -51,6 +61,28 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
   hoveredNodeRef.current = hoveredNode;
   selectedNodeRef.current = selectedNode;
 
+  const getForceGraph = useCallback((): ForceGraphInstance | null => {
+    const current = fgRef.current as unknown;
+    if (!current || typeof current !== "object") return null;
+
+    // Some mounts expose the instance directly, others nest it under .current.
+    if ("graphData" in current && typeof (current as { graphData?: unknown }).graphData === "function") {
+      return current as ForceGraphInstance;
+    }
+
+    const nested = (current as { current?: unknown }).current;
+    if (
+      nested &&
+      typeof nested === "object" &&
+      "graphData" in nested &&
+      typeof (nested as { graphData?: unknown }).graphData === "function"
+    ) {
+      return nested as ForceGraphInstance;
+    }
+
+    return null;
+  }, []);
+
   // Memoize graph data so react-force-graph-2d receives a stable reference.
   // Only recomputes when the actual node/edge arrays change, NOT on hover/select.
   const stableGraphData = useMemo(() => ({
@@ -58,29 +90,43 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     links: graphData.edges.map((e) => ({ ...e })),
   }), [graphData.nodes, graphData.edges]);
 
-  useEffect(() => {
-    fetchGraph();
-  }, [fetchGraph]);
-
   // Measure container and respond to resize
   useEffect(() => {
     const measure = () => {
       if (containerRef.current) {
+        const width = Math.max(1, containerRef.current.clientWidth);
+        const height = Math.max(1, containerRef.current.clientHeight);
         setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
+          width,
+          height,
         });
       }
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+
+    let rafId: number | null = null;
+    const scheduleMeasure = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(measure);
+    };
+
+    // First measure can be too early right after mount.
+    scheduleMeasure();
+    const timeoutId = setTimeout(measure, 120);
+    const ro = new ResizeObserver(scheduleMeasure);
     if (containerRef.current) ro.observe(containerRef.current);
-    return () => ro.disconnect();
+    window.addEventListener("resize", scheduleMeasure);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      clearTimeout(timeoutId);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // Update force graph whenever graph data actually changes
   useEffect(() => {
-    const fg = fgRef.current;
+    const fg = getForceGraph();
     if (!fg || stableGraphData.nodes.length === 0) return;
 
     // Explicitly push data via imperative API to guarantee the update
@@ -92,26 +138,27 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
 
     // Stronger repulsion: scale with node count to prevent clustering
     const charge = fg.d3Force("charge");
-    if (charge) {
+    if (charge && typeof charge.strength === "function") {
       const strength = -Math.min(500, 120 + n * 12);
       charge.strength(strength);
     }
 
     // Longer link distance: more room between connected nodes
     const link = fg.d3Force("link");
-    if (link) {
+    if (link && typeof link.distance === "function") {
       const distance = Math.min(180, 80 + n * 2);
       link.distance(distance);
     }
 
     // Restart simulation so new forces take effect
     fg.d3ReheatSimulation();
-  }, [stableGraphData]);
+  }, [getForceGraph, stableGraphData]);
 
   // Zoom to fit the whole graph once simulation settles
   const handleEngineStop = useCallback(() => {
-    fgRef.current?.zoomToFit(600, 50);
-  }, []);
+    const fg = getForceGraph();
+    fg?.zoomToFit(600, 50);
+  }, [getForceGraph]);
 
   const handleNodeClick = useCallback(
     (node: NodeObject) => {

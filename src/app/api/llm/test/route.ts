@@ -8,10 +8,7 @@ export async function POST(request: Request) {
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY || "";
-    const modelId =
-      model === "openrouter/free" || model.endsWith(":free")
-        ? model
-        : `${model}:free`;
+    const modelId = model;
 
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",

@@ -10,9 +10,7 @@ const DEFAULT_CONFIG: LLMConfig = {
 };
 
 function toOpenRouterModelId(model: string): string {
-  if (model === "openrouter/free") return model;
-  if (model.endsWith(":free")) return model;
-  return `${model}:free`;
+  return model;
 }
 
 async function callOpenRouter(

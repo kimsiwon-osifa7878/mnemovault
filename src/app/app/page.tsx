@@ -14,13 +14,15 @@ import StorageGuard from "@/components/StorageGuard";
 import StorageSettings from "@/components/StorageSettings";
 import { useWikiStore } from "@/stores/wiki-store";
 import { useGraphStore } from "@/stores/graph-store";
-import { parseWikilinks } from "@/lib/wiki/parser";
+import { useStorageStore } from "@/stores/storage-store";
+import { buildGraphData, parseWikilinks } from "@/lib/wiki/parser";
 import { toSlug } from "@/lib/utils/markdown";
 import { Network, AlertTriangle, PanelRightClose, PanelRight, Settings } from "lucide-react";
 
 function IDELayout() {
-  const { fetchPage, fetchPages, currentSlug, pages } = useWikiStore();
-  const { fetchGraph } = useGraphStore();
+  const { fetchPage, fetchPages, pages } = useWikiStore();
+  const { fetchGraph, setGraphData } = useGraphStore();
+  const { isReady, contentHandle } = useStorageStore();
   const [showIngest, setShowIngest] = useState(false);
   const [showCompile, setShowCompile] = useState(false);
   const [showNewPage, setShowNewPage] = useState(false);
@@ -71,8 +73,18 @@ function IDELayout() {
   }, [fetchGraph]);
 
   useEffect(() => {
+    if (!isReady || !contentHandle) return;
+    fetchPages();
+    fetchGraph();
     handlePageSelect("index");
-  }, [handlePageSelect]);
+  }, [contentHandle, fetchGraph, fetchPages, handlePageSelect, isReady]);
+
+  // Keep graph view in sync with sidebar/editor pages.
+  // This avoids graph desync if direct file scan is delayed.
+  useEffect(() => {
+    if (!isReady) return;
+    setGraphData(buildGraphData(pages));
+  }, [isReady, pages, setGraphData]);
 
   return (
     <div className="flex h-screen bg-[#0a0a0f]">
