@@ -36,7 +36,7 @@ export async function readFile(
 export async function writeFile(
   root: FileSystemDirectoryHandle,
   filePath: string,
-  content: string
+  content: string | ArrayBuffer | Uint8Array
 ): Promise<void> {
   const { dirParts, fileName } = splitPath(filePath);
   const dir = dirParts.length > 0

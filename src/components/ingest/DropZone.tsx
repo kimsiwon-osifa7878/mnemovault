@@ -65,11 +65,12 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
       const root = useStorageStore.getState().contentHandle;
       if (!root) throw new Error("Storage not connected");
 
-      const content = await file.text();
+      // Use arrayBuffer to preserve binary files (e.g. PDF) exactly as-is
+      const buffer = await file.arrayBuffer();
 
       // Save raw file
       const rawPath = `raw/${fileType}s/${file.name}`;
-      await clientFs.writeFile(root, rawPath, content);
+      await clientFs.writeFile(root, rawPath, buffer);
 
       setResult({
         success: true,
