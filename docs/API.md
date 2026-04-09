@@ -19,6 +19,7 @@ Raw 소스를 LLM에게 보내 위키 컴파일 결과를 받는다.
   content: string;
   fileType: "article" | "paper" | "note" | "data";
   llmConfig: LLMConfig;
+  language?: "en" | "ko";   // LLM 출력 언어 (기본: "en")
 }
 
 // Response → IngestLLMResult
@@ -41,6 +42,7 @@ Raw 소스를 LLM에게 보내 위키 컴파일 결과를 받는다.
   question: string;
   context: string;
   llmConfig: LLMConfig;
+  language?: "en" | "ko";   // LLM 출력 언어 (기본: "en")
 }
 
 // Response
