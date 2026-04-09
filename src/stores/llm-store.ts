@@ -4,30 +4,30 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export interface LLMSettings {
-  provider: "claude" | "ollama";
-  claudeModel: string;
+  provider: "openrouter" | "ollama";
+  openrouterModel: string;
   ollamaModel: string;
   ollamaUrl: string;
 }
 
 interface LLMState extends LLMSettings {
-  setProvider: (provider: "claude" | "ollama") => void;
-  setClaudeModel: (model: string) => void;
+  setProvider: (provider: "openrouter" | "ollama") => void;
+  setOpenRouterModel: (model: string) => void;
   setOllamaModel: (model: string) => void;
   setOllamaUrl: (url: string) => void;
-  getConfig: () => { provider: "claude" | "ollama"; model: string; ollamaUrl?: string };
+  getConfig: () => { provider: "openrouter" | "ollama"; model: string; ollamaUrl?: string };
 }
 
 export const useLLMStore = create<LLMState>()(
   persist(
     (set, get) => ({
-      provider: "claude",
-      claudeModel: "claude-sonnet-4-6",
+      provider: "openrouter",
+      openrouterModel: "openrouter/free",
       ollamaModel: "gemma4:e4b",
       ollamaUrl: "http://localhost:11434",
 
       setProvider: (provider) => set({ provider }),
-      setClaudeModel: (claudeModel) => set({ claudeModel }),
+      setOpenRouterModel: (openrouterModel) => set({ openrouterModel }),
       setOllamaModel: (ollamaModel) => set({ ollamaModel }),
       setOllamaUrl: (ollamaUrl) => set({ ollamaUrl }),
 
@@ -41,13 +41,25 @@ export const useLLMStore = create<LLMState>()(
           };
         }
         return {
-          provider: "claude" as const,
-          model: state.claudeModel,
+          provider: "openrouter" as const,
+          model: state.openrouterModel,
         };
       },
     }),
     {
       name: "mnemovault-llm-settings",
+      version: 1,
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>;
+        if (version === 0 || !version) {
+          if (state.provider === "claude") state.provider = "openrouter";
+          if (state.claudeModel) {
+            state.openrouterModel = "openrouter/free";
+            delete state.claudeModel;
+          }
+        }
+        return state as unknown as LLMState;
+      },
     }
   )
 );

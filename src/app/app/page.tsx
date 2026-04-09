@@ -6,6 +6,7 @@ import EditorPane from "@/components/layout/EditorPane";
 import ChatPane from "@/components/layout/ChatPane";
 import GraphView from "@/components/graph/GraphView";
 import DropZone from "@/components/ingest/DropZone";
+import CompileModal from "@/components/compile/CompileModal";
 import NewPageModal from "@/components/NewPageModal";
 import LintPanel from "@/components/LintPanel";
 import LLMSettings from "@/components/LLMSettings";
@@ -21,6 +22,7 @@ function IDELayout() {
   const { fetchPage, fetchPages, currentSlug, pages } = useWikiStore();
   const { fetchGraph } = useGraphStore();
   const [showIngest, setShowIngest] = useState(false);
+  const [showCompile, setShowCompile] = useState(false);
   const [showNewPage, setShowNewPage] = useState(false);
   const [showLint, setShowLint] = useState(false);
   const [showLLMSettings, setShowLLMSettings] = useState(false);
@@ -55,6 +57,11 @@ function IDELayout() {
     fetchGraph();
   }, [fetchPages, fetchGraph]);
 
+  const handleCompileComplete = useCallback(() => {
+    fetchPages();
+    fetchGraph();
+  }, [fetchPages, fetchGraph]);
+
   useEffect(() => {
     handlePageSelect("index");
   }, [handlePageSelect]);
@@ -69,6 +76,7 @@ function IDELayout() {
           onNewPage={() => setShowNewPage(true)}
           onSettingsClick={() => setShowLLMSettings(true)}
           onStorageClick={() => setShowStorageSettings(true)}
+          onCompileClick={() => setShowCompile(true)}
         />
       </div>
 
@@ -158,6 +166,12 @@ function IDELayout() {
             handlePageSelect(slug);
             fetchPages();
           }}
+        />
+      )}
+      {showCompile && (
+        <CompileModal
+          onClose={() => setShowCompile(false)}
+          onComplete={handleCompileComplete}
         />
       )}
       {showLint && <LintPanel onClose={() => setShowLint(false)} />}

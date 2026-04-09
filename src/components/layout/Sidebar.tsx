@@ -12,7 +12,9 @@ import {
   Plus,
   Search,
   Upload,
+  Zap,
 } from "lucide-react";
+import { getUncompiledCount } from "@/lib/compile/get-uncompiled";
 
 interface SidebarProps {
   onPageSelect: (slug: string) => void;
@@ -20,6 +22,7 @@ interface SidebarProps {
   onNewPage: () => void;
   onSettingsClick?: () => void;
   onStorageClick?: () => void;
+  onCompileClick?: () => void;
 }
 
 interface TreeSection {
@@ -34,10 +37,12 @@ export default function Sidebar({
   onNewPage,
   onSettingsClick,
   onStorageClick,
+  onCompileClick,
 }: SidebarProps) {
   const { pages, currentSlug, fetchPages } = useWikiStore();
-  const { provider, ollamaModel, claudeModel } = useLLMStore();
-  const { folderName } = useStorageStore();
+  const { provider, ollamaModel, openrouterModel } = useLLMStore();
+  const { folderName, contentHandle } = useStorageStore();
+  const [uncompiledCount, setUncompiledCount] = useState(0);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["concepts", "entities", "sources", "analyses"])
   );
@@ -46,6 +51,11 @@ export default function Sidebar({
   useEffect(() => {
     fetchPages();
   }, [fetchPages]);
+
+  useEffect(() => {
+    if (!contentHandle) return;
+    getUncompiledCount(contentHandle).then(setUncompiledCount).catch(() => {});
+  }, [contentHandle, pages]);
 
   const sections: TreeSection[] = [
     {
@@ -208,11 +218,11 @@ export default function Sidebar({
         >
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              provider === "ollama" ? "bg-emerald-400" : "bg-blue-400"
+              provider === "ollama" ? "bg-emerald-400" : "bg-violet-400"
             }`}
           />
           <span className="truncate">
-            {provider === "ollama" ? `Ollama · ${ollamaModel}` : `Claude · ${claudeModel.split("-").slice(0, 2).join(" ")}`}
+            {provider === "ollama" ? `Ollama · ${ollamaModel}` : `OpenRouter · ${openrouterModel}`}
           </span>
         </button>
         <button
@@ -221,6 +231,18 @@ export default function Sidebar({
         >
           <Plus className="w-3.5 h-3.5" />
           New Page
+        </button>
+        <button
+          onClick={onCompileClick}
+          className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+        >
+          <Zap className="w-3.5 h-3.5" />
+          Compile
+          {uncompiledCount > 0 && (
+            <span className="ml-auto px-1.5 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-medium">
+              {uncompiledCount}
+            </span>
+          )}
         </button>
         <button
           onClick={onIngestClick}

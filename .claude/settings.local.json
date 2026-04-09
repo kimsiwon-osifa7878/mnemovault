@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(curl -s -w '\\\\nHTTP_STATUS:%{http_code}' https://openrouter.ai/api/v1/chat/completions -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); console.log\\('KEY:', JSON.stringify\\(process.env.OPENROUTER_API_KEY\\)\\); console.log\\('MODELS:', JSON.stringify\\(process.env.OPENROUTER_FREE_MODELS\\)\\);\")"
+    ]
+  }
+}

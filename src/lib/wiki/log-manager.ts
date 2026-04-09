@@ -1,6 +1,6 @@
 export function appendLogEntry(
   existingLog: string,
-  operation: "ingest" | "query" | "lint",
+  operation: "ingest" | "query" | "lint" | "compile",
   summary: string,
   details: string[]
 ): string {

@@ -1,25 +1,52 @@
-import Anthropic from "@anthropic-ai/sdk";
-
 export interface LLMConfig {
-  provider: "claude" | "ollama";
+  provider: "openrouter" | "ollama";
   model: string;
   ollamaUrl?: string;
 }
 
 const DEFAULT_CONFIG: LLMConfig = {
-  provider: "claude",
-  model: "claude-sonnet-4-6",
+  provider: "openrouter",
+  model: "openrouter/free",
 };
 
-let anthropicClient: Anthropic | null = null;
+function toOpenRouterModelId(model: string): string {
+  if (model === "openrouter/free") return model;
+  if (model.endsWith(":free")) return model;
+  return `${model}:free`;
+}
 
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    anthropicClient = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY || "",
-    });
+async function callOpenRouter(
+  systemPrompt: string,
+  userMessage: string,
+  model: string,
+  maxTokens: number
+): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
+  const modelId = toOpenRouterModelId(model);
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: maxTokens,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} ${errorText}`);
   }
-  return anthropicClient;
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
 }
 
 async function callOllama(
@@ -54,25 +81,6 @@ async function callOllama(
   return data.message?.content || "";
 }
 
-async function callAnthropic(
-  systemPrompt: string,
-  userMessage: string,
-  model: string,
-  maxTokens: number
-): Promise<string> {
-  const client = getAnthropicClient();
-
-  const response = await client.messages.create({
-    model,
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  });
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  return textBlock ? textBlock.text : "";
-}
-
 export async function callLLM(
   systemPrompt: string,
   userMessage: string,
@@ -86,14 +94,5 @@ export async function callLLM(
     return callOllama(systemPrompt, userMessage, cfg.model, baseUrl, maxTokens);
   }
 
-  return callAnthropic(systemPrompt, userMessage, cfg.model, maxTokens);
-}
-
-// Keep backward compatibility
-export async function callClaude(
-  systemPrompt: string,
-  userMessage: string,
-  maxTokens: number = 4096
-): Promise<string> {
-  return callLLM(systemPrompt, userMessage, maxTokens);
+  return callOpenRouter(systemPrompt, userMessage, cfg.model, maxTokens);
 }

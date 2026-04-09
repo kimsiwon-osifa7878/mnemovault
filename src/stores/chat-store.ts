@@ -14,7 +14,7 @@ export interface ChatMessage {
 }
 
 interface LLMConfig {
-  provider: "claude" | "ollama";
+  provider: "openrouter" | "ollama";
   model: string;
   ollamaUrl?: string;
 }
