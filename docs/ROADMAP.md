@@ -40,6 +40,9 @@
 - [ ] 키보드 단축키 (Cmd+K 검색, Cmd+S 저장 등)
 - [ ] Vercel 배포 + StorageAdapter 추상화
 - [ ] 파일 변경 감지 (change detection)
+- [ ] 옵시디언 호환성 강화 (`[[wikilink]]`, frontmatter, 첨부 자산 폴더)
+- [ ] Query 결과 filing UX 개선 (`analysis`/`comparison`/`overview` 선택 가능)
+- [ ] 위키 canonical form 검증 (앱 상태 없이 markdown 파일만으로 재구성 가능해야 함)
 
 ---
 

@@ -33,6 +33,7 @@ Raw 소스를 LLM에게 보내 위키 컴파일 결과를 받는다.
 ### `POST /api/llm/query`
 
 위키 컨텍스트를 포함하여 LLM에게 질의응답.
+이 API는 **답변 생성만** 담당하며, 답변을 위키 페이지로 filing하는 것은 클라이언트가 별도로 처리한다.
 
 ```typescript
 // Request

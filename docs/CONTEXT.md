@@ -15,9 +15,10 @@
 | Ingest 흐름 | ⚠️ DropZone은 raw 저장만, **Compile 버튼으로 별도 LLM 처리** |
 | 위키 CRUD | ✅ 클라이언트에서 직접 파일 읽기/쓰기 |
 | 그래프 뷰 | ✅ react-force-graph-2d |
-| Chat | ✅ Context-Aware 질의응답 |
+| Chat | ✅ Context-Aware 질의응답 + 선택적 위키 filing |
 | Lint | ✅ 정적 검사 + LLM 모순 감지 |
 | 서버 역할 | LLM API 중계만 (`/api/llm/*`) |
+| 데이터 원칙 | ✅ canonical form은 로컬 markdown 파일 집합 |
 
 ---
 
@@ -115,7 +116,8 @@ graph.ts        — getNeighborNodes(): 양방향 이웃 노드.
                   getBacklinksFromGraph(): GraphData에서 역참조 조회.
 
 index-manager.ts — generateIndexContent(): 전체 페이지 목록으로 index.md 자동 생성.
-                   섹션: Concepts, Entities, Sources, Analyses.
+                   현재 섹션: Concepts, Entities, Sources, Analyses.
+                   목표 설계상 Comparisons / Overview도 편입 가능.
 
 log-manager.ts  — appendLogEntry(): log.md에 타임스탬프 + 작업 기록 append.
                   operations: "ingest" | "query" | "lint" | "compile"
@@ -152,6 +154,7 @@ llm-store.ts     — LLM 설정 (localStorage 영속화, key: "mnemovault-llm-se
 chat-store.ts    — 채팅 히스토리 + sendQuery().
                    buildQueryContext(): index.md + 현재문서 + 1-hop 이웃(5개) + 상위 20개 페이지.
                    fileAsPage=true 시 wiki/analyses/{slug}.md에 저장 후 log.md 갱신.
+                   현재는 analysis 저장만 지원하며, comparison/overview filing은 아직 미구현.
 
 graph-store.ts   — (별도 탐색 불필요) wiki-store의 pages로 buildGraphData() 호출.
 ```
@@ -342,6 +345,8 @@ content/
     └── processed_files.json   # { "raw/articles/foo.txt": 1712345678000 }
 ```
 
+> 목표 설계(`CLAUDE.md`)에는 `comparison`, `overview`도 포함되지만, 현재 구현은 아직 `analyses/` 중심이다.
+
 ### Frontmatter 필수 필드
 
 ```yaml
@@ -375,10 +380,12 @@ confidence: high    # high | medium | low
 4. **change detection 없음** — `get-uncompiled.ts`는 processed_files.json 존재 여부만 확인. 파일 내용 변경은 감지 안 함. (reason="changed"는 정의되어 있으나 미구현)
 5. **slug 충돌** — 동일 slug 파일이 여러 개일 때 첫 번째 파일만 사용됨 (wiki-store 문제).
 6. **Ollama CORS** — 클라이언트에서 직접 Ollama 모델 목록 조회 시 CORS 설정 필요할 수 있음.
+7. **파일링 타입 제한** — Query 결과 저장은 현재 `analysis`에만 연결되어 있으며, `comparison`/`overview`는 설계만 있고 UI/타입/인덱스 반영이 아직 부족함.
 
 ### 미완성 기능
-7. **Fuse.js 검색** — 사이드바에 검색 인풋이 있으나 Zustand store의 pages 배열을 직접 필터링. Fuse.js import만 되어 있을 수 있음 (확인 필요).
-8. **반응형/모바일** — 아직 미적용. 3-pane 레이아웃은 데스크탑 전용.
+8. **Fuse.js 검색** — 사이드바에 검색 인풋이 있으나 Zustand store의 pages 배열을 직접 필터링. Fuse.js import만 되어 있을 수 있음 (확인 필요).
+9. **반응형/모바일** — 아직 미적용. 3-pane 레이아웃은 데스크탑 전용.
+10. **옵시디언 호환성 점검 부족** — 파일명/폴더/첨부 자산 규칙은 대체로 맞지만, 실제 Obsidian round-trip 테스트나 문서화는 아직 부족함.
 
 ---
 

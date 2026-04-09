@@ -17,10 +17,12 @@ mnemovault/
 │   ├── wiki/                    # LLM이 관리하는 위키 페이지
 │   │   ├── index.md
 │   │   ├── log.md
+│   │   ├── overview.md
 │   │   ├── entities/
 │   │   ├── concepts/
 │   │   ├── sources/
-│   │   └── analyses/
+│   │   ├── analyses/
+│   │   └── comparisons/
 │   └── meta/
 │       └── processed_files.json
 │
@@ -29,7 +31,7 @@ mnemovault/
 │   │   ├── layout.tsx
 │   │   ├── page.tsx
 │   │   ├── api/llm/             # LLM 중계 전용 API
-│   │   ├── app/                  # 메인 IDE 페이지
+│   │   ├── app/                 # 메인 IDE 페이지
 │   │   └── wiki/[slug]/
 │   ├── components/
 │   │   ├── layout/              # Sidebar, EditorPane, ChatPane
@@ -47,6 +49,13 @@ mnemovault/
 │   └── types/
 └── docs/                        # 상세 문서
 ```
+
+### 설계 원칙
+
+- 이 웹앱은 **옵시디언 스타일 IDE/뷰어**다. 파일 트리, 위키링크, 백링크, 그래프 탐색 경험을 웹에서 제공한다.
+- 그러나 시스템의 canonical data는 앱 내부 DB가 아니라 `content/` 아래의 **markdown + frontmatter 파일 집합**이다.
+- 앱 상태(Zustand, 캐시, 그래프 데이터)는 모두 파생물이어야 하며, 가능하면 위키 파일만으로 재구성 가능해야 한다.
+- 위키 산출물은 특정 UI 없이도 Git, Obsidian, 일반 에디터에서 읽고 버전관리할 수 있어야 한다.
 
 ---
 
@@ -96,6 +105,12 @@ confidence: high
 
 ## Analyses
 - [[트랜스포머 vs RNN 비교]] — Query에서 파생된 비교 분석
+
+## Comparisons
+- [[트랜스포머 vs CNN]] — 여러 소스를 종합한 비교 페이지
+
+## Overview
+- [[overview]] — 현재 주제 전반에 대한 상위 수준 synthesis
 ```
 
 ### log.md 포맷
@@ -108,6 +123,11 @@ confidence: high
 - Updated: [[트랜스포머 아키텍처]], [[셀프 어텐션]]
 - New page: [[멀티헤드 어텐션]]
 - Index updated: +3 entries
+
+## [2026-04-06T17:10] query | 트랜스포머와 RNN 비교
+- Pages read: [[트랜스포머 아키텍처]], [[RNN]], [[attention-is-all-you-need-summary]]
+- Filed as: [[트랜스포머 vs RNN 비교]]
+- Index updated: +1 entry
 ```
 
 ---
@@ -130,7 +150,7 @@ interface WikiLink {
 
 ---
 
-## 4. Ingest 파이프라인
+## 4. Ingest / Query 파이프라인
 
 ```
 [파일 업로드] → [raw/{type}s/ 에 저장]
@@ -147,6 +167,18 @@ interface WikiLink {
     └── log.md 기록 append
     ↓
 [processed_files.json에 타임스탬프 저장]
+```
+
+### Query + Filing 루프
+
+```
+[질문 입력] → [index.md + 현재 문서 + 이웃 문서들로 컨텍스트 구성]
+    ↓
+[POST /api/llm/query] → 답변 생성
+    ↓
+[사용자가 가치 있다고 판단] → [analysis/comparison/overview 페이지로 filing]
+    ↓
+[index.md 갱신] + [log.md에 query 기록]
 ```
 
 ### LLM 응답 스키마 (IngestLLMResult)
@@ -178,7 +210,7 @@ Query 시 자동으로 포함되는 컨텍스트 우선순위:
 3. 현재 문서의 1-hop 이웃 노드 (최대 5개)
 4. 상위 20개 페이지 (연결 수 기준)
 
-좋은 답변은 `wiki/analyses/`에 재수록하여 위키를 성장시킨다.
+좋은 답변은 `wiki/analyses/`, `wiki/comparisons/`, `wiki/overview.md` 등에 재수록하여 위키를 성장시킨다.
 
 ---
 
@@ -189,6 +221,7 @@ Query 시 자동으로 포함되는 컨텍스트 우선순위:
 - 브라우저에서 로컬 폴더를 직접 읽기/쓰기
 - `FileSystemDirectoryHandle`을 IndexedDB에 저장하여 세션 간 유지
 - 서버는 파일에 접근하지 않음 (LLM 중계만 담당)
+- File System Access API는 웹앱 구현 수단일 뿐이며, 저장 포맷 자체는 옵시디언 호환 가능한 파일 구조를 유지한다
 
 ### 어댑터 패턴
 
@@ -202,7 +235,7 @@ interface StorageAdapter {
 }
 ```
 
-프로덕션 확장 시 Vercel Blob, Supabase, GitHub API 등으로 교체 가능.
+프로덕션 확장 시 Vercel Blob, Supabase, GitHub API 등으로 교체 가능하더라도, 외부 스토리지는 markdown 파일 구조를 투명하게 보존하는 어댑터여야 한다.
 
 ---
 
