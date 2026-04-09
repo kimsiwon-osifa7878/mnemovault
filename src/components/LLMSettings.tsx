@@ -14,10 +14,12 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
     openrouterModel,
     ollamaModel,
     ollamaUrl,
+    language,
     setProvider,
     setOpenRouterModel,
     setOllamaModel,
     setOllamaUrl,
+    setLanguage,
   } = useLLMStore();
 
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
@@ -108,6 +110,37 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Language Selection */}
+        <div className="mb-5">
+          <label className="text-xs text-white/40 block mb-2 uppercase tracking-wider">
+            Wiki Language
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setLanguage("en")}
+              className={`px-4 py-3 rounded-lg border text-sm text-left ${
+                language === "en"
+                  ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                  : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"
+              }`}
+            >
+              <div className="font-medium">English</div>
+              <div className="text-[10px] mt-0.5 opacity-60">Wiki output in English</div>
+            </button>
+            <button
+              onClick={() => setLanguage("ko")}
+              className={`px-4 py-3 rounded-lg border text-sm text-left ${
+                language === "ko"
+                  ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                  : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"
+              }`}
+            >
+              <div className="font-medium">한국어</div>
+              <div className="text-[10px] mt-0.5 opacity-60">Wiki output in Korean</div>
+            </button>
+          </div>
         </div>
 
         {/* Provider Selection */}

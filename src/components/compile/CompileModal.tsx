@@ -100,6 +100,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
 
   const contentHandle = useStorageStore((s) => s.contentHandle);
   const getConfig = useLLMStore((s) => s.getConfig);
+  const language = useLLMStore((s) => s.language);
 
   useEffect(() => {
     if (!contentHandle) return;
@@ -147,7 +148,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
         if (timerRef.current) clearInterval(timerRef.current);
         onComplete();
       }
-    });
+    }, language);
   };
 
   const handleClose = () => {

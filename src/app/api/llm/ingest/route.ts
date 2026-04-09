@@ -5,7 +5,7 @@ import { LLMConfig } from "@/lib/llm/client";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fileName, content, fileType, llmConfig } = body;
+    const { fileName, content, fileType, llmConfig, language } = body;
 
     if (!fileName || !content || !fileType) {
       return NextResponse.json(
@@ -18,7 +18,8 @@ export async function POST(request: Request) {
       ? { provider: llmConfig.provider, model: llmConfig.model, ollamaUrl: llmConfig.ollamaUrl }
       : undefined;
 
-    const result = await processIngestWithLLM(fileName, content, fileType, config);
+    const lang = (language === "ko" ? "ko" : "en") as "en" | "ko";
+    const result = await processIngestWithLLM(fileName, content, fileType, config, lang);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

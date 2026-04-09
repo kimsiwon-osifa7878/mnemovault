@@ -14,7 +14,7 @@ interface ChatPaneProps {
 export default function ChatPane({ onLinkClick }: ChatPaneProps) {
   const { messages, isLoading, sendQuery, clearMessages } = useChatStore();
   const { currentSlug } = useWikiStore();
-  const { getConfig } = useLLMStore();
+  const { getConfig, language } = useLLMStore();
   const [input, setInput] = useState("");
   const [fileAsPage, setFileAsPage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export default function ChatPane({ onLinkClick }: ChatPaneProps) {
     if (!input.trim() || isLoading) return;
     const question = input.trim();
     setInput("");
-    await sendQuery(question, currentSlug || undefined, fileAsPage, getConfig());
+    await sendQuery(question, currentSlug || undefined, fileAsPage, getConfig(), language);
   };
 
   return (

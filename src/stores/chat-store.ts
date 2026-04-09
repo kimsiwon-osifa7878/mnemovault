@@ -29,7 +29,8 @@ interface ChatState {
     question: string,
     currentDocument?: string,
     fileAsPage?: boolean,
-    llmConfig?: LLMConfig
+    llmConfig?: LLMConfig,
+    language?: "en" | "ko"
   ) => Promise<void>;
 }
 
@@ -94,7 +95,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLoading: (isLoading) => set({ isLoading }),
   clearMessages: () => set({ messages: [] }),
 
-  sendQuery: async (question, currentDocument, fileAsPage, llmConfig) => {
+  sendQuery: async (question, currentDocument, fileAsPage, llmConfig, language) => {
     const { addMessage } = get();
     addMessage({ role: "user", content: question });
     set({ isLoading: true });
@@ -110,7 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const res = await fetch("/api/llm/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, context, llmConfig }),
+        body: JSON.stringify({ question, context, llmConfig, language }),
       });
       if (!res.ok) throw new Error("Query failed");
       const data = await res.json();
