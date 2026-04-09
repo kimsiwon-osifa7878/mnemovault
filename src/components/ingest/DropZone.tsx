@@ -63,89 +63,15 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
 
     try {
       const root = useStorageStore.getState().contentHandle;
-      // #region agent log
-      fetch("http://127.0.0.1:7941/ingest/67112587-284e-4dfc-a465-072a186b11be", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4e62d1",
-        },
-        body: JSON.stringify({
-          sessionId: "4e62d1",
-          hypothesisId: "H1",
-          location: "DropZone.tsx:handleIngest:entry",
-          message: "ingest start",
-          data: {
-            hasRoot: !!root,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       if (!root) throw new Error("Storage not connected");
 
-      const content = await file.text();
-      // #region agent log
-      fetch("http://127.0.0.1:7941/ingest/67112587-284e-4dfc-a465-072a186b11be", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4e62d1",
-        },
-        body: JSON.stringify({
-          sessionId: "4e62d1",
-          hypothesisId: "H4",
-          location: "DropZone.tsx:afterFileText",
-          message: "file.text done",
-          data: { contentLength: content.length },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+
+      // Use arrayBuffer to preserve binary files (e.g. PDF) exactly as-is
+      const buffer = await file.arrayBuffer();
 
       // Save raw file
       const rawPath = `raw/${fileType}s/${file.name}`;
-      await clientFs.writeFile(root, rawPath, content);
-      // #region agent log
-      fetch("http://127.0.0.1:7941/ingest/67112587-284e-4dfc-a465-072a186b11be", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4e62d1",
-        },
-        body: JSON.stringify({
-          sessionId: "4e62d1",
-          hypothesisId: "H2",
-          location: "DropZone.tsx:afterRawWrite",
-          message: "raw write ok",
-          data: { rawPath },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-
-      // Raw-only: server LLM ingest is skipped (avoids 500 when API unavailable).
-      // #region agent log
-      fetch("http://127.0.0.1:7941/ingest/67112587-284e-4dfc-a465-072a186b11be", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4e62d1",
-        },
-        body: JSON.stringify({
-          sessionId: "4e62d1",
-          runId: "post-fix",
-          hypothesisId: "H3",
-          location: "DropZone.tsx:rawOnlySuccess",
-          message: "skip /api/llm/ingest after raw write",
-          data: { rawPath },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      await clientFs.writeFile(root, rawPath, buffer);
 
       setResult({
         success: true,
@@ -155,24 +81,6 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
       });
       onComplete();
     } catch (e) {
-      // #region agent log
-      const err = e as Error;
-      fetch("http://127.0.0.1:7941/ingest/67112587-284e-4dfc-a465-072a186b11be", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "4e62d1",
-        },
-        body: JSON.stringify({
-          sessionId: "4e62d1",
-          hypothesisId: "H1-H5",
-          location: "DropZone.tsx:catch",
-          message: "ingest error",
-          data: { name: err?.name, message: err?.message },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError((e as Error).message);
     } finally {
       setIsIngesting(false);

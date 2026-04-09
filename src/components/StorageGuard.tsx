@@ -2,8 +2,7 @@
 
 import { useEffect, useState, ReactNode } from "react";
 import { useStorageStore } from "@/stores/storage-store";
-import StorageSettings from "./StorageSettings";
-import { FolderOpen, AlertTriangle } from "lucide-react";
+import { FolderOpen, AlertTriangle, Loader2 } from "lucide-react";
 
 interface StorageGuardProps {
   children: ReactNode;
@@ -14,9 +13,9 @@ function isFileSystemAccessSupported(): boolean {
 }
 
 export default function StorageGuard({ children }: StorageGuardProps) {
-  const { isReady, restoreFolder } = useStorageStore();
+  const { isReady, restoreFolder, pickFolder } = useStorageStore();
   const [isRestoring, setIsRestoring] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
+  const [isPicking, setIsPicking] = useState(false);
   const [supported, setSupported] = useState(true);
 
   useEffect(() => {
@@ -26,13 +25,19 @@ export default function StorageGuard({ children }: StorageGuardProps) {
       return;
     }
 
-    restoreFolder().then((restored) => {
+    restoreFolder().then(() => {
       setIsRestoring(false);
-      if (!restored) {
-        setShowSettings(true);
-      }
     });
   }, [restoreFolder]);
+
+  const handlePickFolder = async () => {
+    setIsPicking(true);
+    try {
+      await pickFolder();
+    } finally {
+      setIsPicking(false);
+    }
+  };
 
   if (!supported) {
     return (
@@ -76,26 +81,21 @@ export default function StorageGuard({ children }: StorageGuardProps) {
             저장할 폴더를 선택해주세요.
           </p>
           <button
-            onClick={() => setShowSettings(true)}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm transition-colors"
+            onClick={handlePickFolder}
+            disabled={isPicking}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <FolderOpen className="w-4 h-4" />
-            폴더 선택
+            {isPicking ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FolderOpen className="w-4 h-4" />
+            )}
+            {isPicking ? "폴더 선택 중..." : "폴더 선택"}
           </button>
         </div>
-        {showSettings && (
-          <StorageSettings onClose={() => setShowSettings(false)} />
-        )}
       </div>
     );
   }
 
-  return (
-    <>
-      {children}
-      {showSettings && (
-        <StorageSettings onClose={() => setShowSettings(false)} />
-      )}
-    </>
-  );
+  return <>{children}</>;
 }

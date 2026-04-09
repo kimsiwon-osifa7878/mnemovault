@@ -11,46 +11,69 @@ interface LLMSettingsProps {
 export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const {
     provider,
-    claudeModel,
+    openrouterModel,
     ollamaModel,
     ollamaUrl,
+    language,
     setProvider,
-    setClaudeModel,
+    setOpenRouterModel,
     setOllamaModel,
     setOllamaUrl,
+    setLanguage,
   } = useLLMStore();
 
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [openrouterModels, setOpenRouterModels] = useState<string[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "connected" | "error">("unknown");
+  const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
   const [tempUrl, setTempUrl] = useState(ollamaUrl);
 
+  const fetchOpenRouterModels = async () => {
+    try {
+      const res = await fetch("/api/llm/models");
+      if (!res.ok) return;
+      const data = await res.json();
+      setOpenRouterModels(data.models || []);
+    } catch {
+      setOpenRouterModels(["openrouter/free"]);
+    }
+  };
+
+  const testModel = async (model: string) => {
+    setTestStatus("testing");
+    try {
+      const res = await fetch("/api/llm/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      const data = await res.json();
+      setTestStatus(data.status === "ok" ? "ok" : "fail");
+    } catch {
+      setTestStatus("fail");
+    }
+  };
+
+  const handleOpenRouterModelChange = (model: string) => {
+    setOpenRouterModel(model);
+    testModel(model);
+  };
+
   const fetchOllamaModels = async (url: string) => {
-    // #region agent log
-    fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H4",location:"src/components/LLMSettings.tsx:29",message:"fetchOllamaModels called",data:{url,provider,origin:typeof window!=="undefined"?window.location.origin:"server"},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setIsFetching(true);
     setOllamaStatus("unknown");
     try {
       const res = await fetch(`${url}/api/tags`);
-      // #region agent log
-      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H3",location:"src/components/LLMSettings.tsx:36",message:"ollama tags fetch response",data:{ok:res.ok,status:res.status,statusText:res.statusText,responseType:res.type},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (!res.ok) throw new Error("Failed to connect");
       const data = await res.json();
       const models = (data.models || []).map((m: { name: string }) => m.name);
-      // #region agent log
-      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H5",location:"src/components/LLMSettings.tsx:42",message:"ollama models parsed",data:{modelCount:models.length,firstModel:models[0]||null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setOllamaModels(models);
       setOllamaStatus("connected");
       if (models.length > 0 && !models.includes(ollamaModel)) {
         setOllamaModel(models[0]);
       }
-    } catch (error) {
-      // #region agent log
-      fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H1-H4",location:"src/components/LLMSettings.tsx:50",message:"fetchOllamaModels failed",data:{error:error instanceof Error?error.message:String(error),url},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+    } catch {
       setOllamaModels([]);
       setOllamaStatus("error");
     } finally {
@@ -59,16 +82,16 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   };
 
   useEffect(() => {
-    if (provider === "ollama") {
+    if (provider === "openrouter") {
+      fetchOpenRouterModels();
+    } else if (provider === "ollama") {
       fetchOllamaModels(ollamaUrl);
     }
+    setTestStatus("idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
   const handleUrlApply = () => {
-    // #region agent log
-    fetch("http://127.0.0.1:7830/ingest/a1579631-1249-47fd-b66e-182a1c947ec3",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"185208"},body:JSON.stringify({sessionId:"185208",runId:"pre-fix",hypothesisId:"H2-H4",location:"src/components/LLMSettings.tsx:67",message:"connect button apply url",data:{tempUrl,trimmedUrl:tempUrl.trim()},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setOllamaUrl(tempUrl);
     fetchOllamaModels(tempUrl);
   };
@@ -89,6 +112,37 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           </button>
         </div>
 
+        {/* Language Selection */}
+        <div className="mb-5">
+          <label className="text-xs text-white/40 block mb-2 uppercase tracking-wider">
+            Wiki Language
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setLanguage("en")}
+              className={`px-4 py-3 rounded-lg border text-sm text-left ${
+                language === "en"
+                  ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                  : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"
+              }`}
+            >
+              <div className="font-medium">English</div>
+              <div className="text-[10px] mt-0.5 opacity-60">Wiki output in English</div>
+            </button>
+            <button
+              onClick={() => setLanguage("ko")}
+              className={`px-4 py-3 rounded-lg border text-sm text-left ${
+                language === "ko"
+                  ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
+                  : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"
+              }`}
+            >
+              <div className="font-medium">한국어</div>
+              <div className="text-[10px] mt-0.5 opacity-60">Wiki output in Korean</div>
+            </button>
+          </div>
+        </div>
+
         {/* Provider Selection */}
         <div className="mb-5">
           <label className="text-xs text-white/40 block mb-2 uppercase tracking-wider">
@@ -96,15 +150,15 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button
-              onClick={() => setProvider("claude")}
+              onClick={() => setProvider("openrouter")}
               className={`px-4 py-3 rounded-lg border text-sm text-left ${
-                provider === "claude"
-                  ? "border-blue-500/50 bg-blue-500/10 text-blue-400"
+                provider === "openrouter"
+                  ? "border-violet-500/50 bg-violet-500/10 text-violet-400"
                   : "border-white/10 bg-white/[0.02] text-white/40 hover:border-white/20"
               }`}
             >
-              <div className="font-medium">Claude</div>
-              <div className="text-[10px] mt-0.5 opacity-60">Anthropic API</div>
+              <div className="font-medium">OpenRouter</div>
+              <div className="text-[10px] mt-0.5 opacity-60">Free models</div>
             </button>
             <button
               onClick={() => setProvider("ollama")}
@@ -120,23 +174,47 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           </div>
         </div>
 
-        {/* Claude Settings */}
-        {provider === "claude" && (
+        {/* OpenRouter Settings */}
+        {provider === "openrouter" && (
           <div className="space-y-3">
             <div>
               <label className="text-xs text-white/40 block mb-1">Model</label>
-              <select
-                value={claudeModel}
-                onChange={(e) => setClaudeModel(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 focus:border-blue-500/50 focus:outline-none"
-              >
-                <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                <option value="claude-opus-4-6">Claude Opus 4.6</option>
-                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={openrouterModel}
+                  onChange={(e) => handleOpenRouterModelChange(e.target.value)}
+                  className="flex-1 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 focus:border-violet-500/50 focus:outline-none [&>option]:bg-[#1a1a2e] [&>option]:text-white/90"
+                >
+                  {openrouterModels.length > 0 ? (
+                    openrouterModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="openrouter/free">openrouter/free</option>
+                  )}
+                </select>
+                {testStatus === "testing" && (
+                  <Loader2 className="w-4 h-4 text-violet-400 animate-spin shrink-0" />
+                )}
+                {testStatus === "ok" && (
+                  <span className="flex items-center gap-1 text-xs text-emerald-400 shrink-0">
+                    <CheckCircle className="w-4 h-4" />
+                    ok
+                  </span>
+                )}
+                {testStatus === "fail" && (
+                  <span className="flex items-center gap-1 text-xs text-red-400 shrink-0">
+                    <AlertCircle className="w-4 h-4" />
+                    fail
+                  </span>
+                )}
+              </div>
             </div>
             <p className="text-[10px] text-white/30">
-              API key is configured via ANTHROPIC_API_KEY environment variable.
+              API key is configured via OPENROUTER_API_KEY environment variable.
+              Models loaded from OPENROUTER_FREE_MODELS.
             </p>
           </div>
         )}
@@ -167,7 +245,6 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   )}
                 </button>
               </div>
-              {/* Connection status */}
               {ollamaStatus === "connected" && (
                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mt-1">
                   <CheckCircle className="w-3 h-3" />
@@ -188,7 +265,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                 <select
                   value={ollamaModel}
                   onChange={(e) => setOllamaModel(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 focus:border-emerald-500/50 focus:outline-none"
+                  className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 focus:border-emerald-500/50 focus:outline-none [&>option]:bg-[#1a1a2e] [&>option]:text-white/90"
                 >
                   {ollamaModels.map((m) => (
                     <option key={m} value={m}>

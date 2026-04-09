@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ':*)",
+      "Bash(xargs ls:*)",
+      "Bash(xargs head:*)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

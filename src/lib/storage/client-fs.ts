@@ -33,10 +33,23 @@ export async function readFile(
   return file.text();
 }
 
+export async function readFileAsBuffer(
+  root: FileSystemDirectoryHandle,
+  filePath: string
+): Promise<ArrayBuffer> {
+  const { dirParts, fileName } = splitPath(filePath);
+  const dir = dirParts.length > 0
+    ? await getNestedDirHandle(root, dirParts)
+    : root;
+  const fileHandle = await dir.getFileHandle(fileName);
+  const file = await fileHandle.getFile();
+  return file.arrayBuffer();
+}
+
 export async function writeFile(
   root: FileSystemDirectoryHandle,
   filePath: string,
-  content: string
+  content: string | ArrayBuffer
 ): Promise<void> {
   const { dirParts, fileName } = splitPath(filePath);
   const dir = dirParts.length > 0
@@ -94,6 +107,43 @@ async function collectFiles(
     }
   }
   return files;
+}
+
+async function collectAllFiles(
+  dir: FileSystemDirectoryHandle,
+  basePath: string
+): Promise<string[]> {
+  const files: string[] = [];
+  for await (const entry of dir.values()) {
+    const entryPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+    if (entry.kind === "directory") {
+      const subHandle = await dir.getDirectoryHandle(entry.name);
+      const subFiles = await collectAllFiles(subHandle, entryPath);
+      files.push(...subFiles);
+    } else {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+export async function listAllFiles(
+  root: FileSystemDirectoryHandle,
+  prefix: string
+): Promise<string[]> {
+  const normalized = prefix.replace(/\\/g, "/").replace(/^\//, "").replace(/\/$/, "");
+  const parts = normalized ? normalized.split("/") : [];
+
+  let dir: FileSystemDirectoryHandle;
+  try {
+    dir = parts.length > 0
+      ? await getNestedDirHandle(root, parts)
+      : root;
+  } catch {
+    return [];
+  }
+
+  return collectAllFiles(dir, normalized);
 }
 
 export async function fileExists(
