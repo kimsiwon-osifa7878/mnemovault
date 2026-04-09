@@ -66,7 +66,7 @@ export default function LintPanel({ onClose }: LintPanelProps) {
   const [issues, setIssues] = useState<LintIssue[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [hasRun, setHasRun] = useState(false);
-  const { getConfig } = useLLMStore();
+  const { getConfig, language } = useLLMStore();
 
   const runLint = async () => {
     setIsRunning(true);
@@ -99,6 +99,7 @@ export default function LintPanel({ onClose }: LintPanelProps) {
             body: JSON.stringify({
               pageSummaries: summaries.join("\n\n"),
               llmConfig: getConfig(),
+              language,
             }),
           });
           if (res.ok) {

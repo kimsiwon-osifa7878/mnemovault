@@ -20,7 +20,8 @@ export async function runCompile(
   root: FileSystemDirectoryHandle,
   files: UncompiledFile[],
   llmConfig: LLMConfig,
-  onProgress: (progress: CompileProgress) => void
+  onProgress: (progress: CompileProgress) => void,
+  language: "en" | "ko" = "en"
 ): Promise<CompileFileResult[]> {
   const progress: CompileProgress = {
     total: files.length,
@@ -49,7 +50,7 @@ export async function runCompile(
     progress.currentFile = file.fileName;
     onProgress({ ...progress });
 
-    const result = await compileFile(root, file, llmConfig, existingSlugs);
+    const result = await compileFile(root, file, llmConfig, existingSlugs, language);
     progress.results.push(result);
 
     // Update processed_files.json immediately per file

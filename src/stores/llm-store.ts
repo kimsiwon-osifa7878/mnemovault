@@ -8,6 +8,7 @@ export interface LLMSettings {
   openrouterModel: string;
   ollamaModel: string;
   ollamaUrl: string;
+  language: "en" | "ko";
 }
 
 interface LLMState extends LLMSettings {
@@ -15,6 +16,7 @@ interface LLMState extends LLMSettings {
   setOpenRouterModel: (model: string) => void;
   setOllamaModel: (model: string) => void;
   setOllamaUrl: (url: string) => void;
+  setLanguage: (language: "en" | "ko") => void;
   getConfig: () => { provider: "openrouter" | "ollama"; model: string; ollamaUrl?: string };
 }
 
@@ -25,11 +27,13 @@ export const useLLMStore = create<LLMState>()(
       openrouterModel: "openrouter/free",
       ollamaModel: "gemma4:e4b",
       ollamaUrl: "http://localhost:11434",
+      language: "en",
 
       setProvider: (provider) => set({ provider }),
       setOpenRouterModel: (openrouterModel) => set({ openrouterModel }),
       setOllamaModel: (ollamaModel) => set({ ollamaModel }),
       setOllamaUrl: (ollamaUrl) => set({ ollamaUrl }),
+      setLanguage: (language) => set({ language }),
 
       getConfig: () => {
         const state = get();
@@ -48,7 +52,7 @@ export const useLLMStore = create<LLMState>()(
     }),
     {
       name: "mnemovault-llm-settings",
-      version: 1,
+      version: 2,
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 0 || !version) {
@@ -57,6 +61,9 @@ export const useLLMStore = create<LLMState>()(
             state.openrouterModel = "openrouter/free";
             delete state.claudeModel;
           }
+        }
+        if (version < 2) {
+          if (!state.language) state.language = "en";
         }
         return state as unknown as LLMState;
       },

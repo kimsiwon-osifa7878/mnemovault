@@ -107,7 +107,8 @@ export async function compileFile(
   root: FileSystemDirectoryHandle,
   file: UncompiledFile,
   llmConfig: LLMConfig,
-  existingSlugs: Set<string>
+  existingSlugs: Set<string>,
+  language: "en" | "ko" = "en"
 ): Promise<CompileFileResult> {
   const logs: CompileLogEntry[] = [];
   const result: CompileFileResult = {
@@ -130,6 +131,7 @@ export async function compileFile(
       content,
       fileType: file.fileType,
       llmConfig,
+      language,
     };
     log(logs, "request", `POST /api/llm/ingest`, JSON.stringify({
       fileName: file.fileName,
