@@ -65,6 +65,7 @@ export default function DropZone({ onClose, onComplete }: DropZoneProps) {
       const root = useStorageStore.getState().contentHandle;
       if (!root) throw new Error("Storage not connected");
 
+
       // Use arrayBuffer to preserve binary files (e.g. PDF) exactly as-is
       const buffer = await file.arrayBuffer();
 
