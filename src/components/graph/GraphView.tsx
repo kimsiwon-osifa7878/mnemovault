@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import { useGraphStore } from "@/stores/graph-store";
 import dynamic from "next/dynamic";
 
@@ -18,6 +18,10 @@ const NODE_COLORS: Record<string, string> = {
 };
 
 const LEGEND_TYPES = ["concept", "entity", "source", "analysis"] as const;
+
+// Stable function references to avoid re-renders from inline arrow functions
+const NODE_CANVAS_MODE = () => "replace" as const;
+const LINK_COLOR = () => "rgba(255,255,255,0.10)";
 
 interface GraphViewProps {
   onNodeClick: (slug: string) => void;
@@ -40,6 +44,20 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 320, height: 400 });
 
+  // Refs to hold latest hover/select state — lets nodeCanvasObject read
+  // current values without being recreated on every state change
+  const hoveredNodeRef = useRef<string | null>(null);
+  const selectedNodeRef = useRef<string | null>(null);
+  hoveredNodeRef.current = hoveredNode;
+  selectedNodeRef.current = selectedNode;
+
+  // Memoize graph data so react-force-graph-2d receives a stable reference.
+  // Only recomputes when the actual node/edge arrays change, NOT on hover/select.
+  const stableGraphData = useMemo(() => ({
+    nodes: graphData.nodes.map((n) => ({ ...n })),
+    links: graphData.edges.map((e) => ({ ...e })),
+  }), [graphData.nodes, graphData.edges]);
+
   useEffect(() => {
     fetchGraph();
   }, [fetchGraph]);
@@ -60,12 +78,12 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Configure D3 forces whenever graph data changes
+  // Configure D3 forces whenever graph data actually changes
   useEffect(() => {
     const fg = fgRef.current;
-    if (!fg || graphData.nodes.length === 0) return;
+    if (!fg || stableGraphData.nodes.length === 0) return;
 
-    const n = graphData.nodes.length;
+    const n = stableGraphData.nodes.length;
 
     // Stronger repulsion: scale with node count to prevent clustering
     const charge = fg.d3Force("charge");
@@ -83,7 +101,7 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
 
     // Restart simulation so new forces take effect
     fg.d3ReheatSimulation();
-  }, [graphData]);
+  }, [stableGraphData]);
 
   // Zoom to fit the whole graph once simulation settles
   const handleEngineStop = useCallback(() => {
@@ -114,8 +132,9 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
       const y = node.y ?? 0;
       const id = String(node.id ?? "");
 
-      const isSelected = selectedNode === id;
-      const isHovered = hoveredNode === id;
+      // Read from refs — no dependency on React state, so callback is stable
+      const isSelected = selectedNodeRef.current === id;
+      const isHovered = hoveredNodeRef.current === id;
 
       const color = NODE_COLORS[type] || "#60a5fa";
 
@@ -192,7 +211,7 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
         : "rgba(255,255,255,0.5)";
       ctx.fillText(displayLabel, x, labelY);
     },
-    [selectedNode, hoveredNode]
+    [] // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs intentionally
   );
 
   if (graphData.nodes.length === 0) {
@@ -224,17 +243,14 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     <div ref={containerRef} className="w-full h-full relative">
       <ForceGraph2D
         ref={fgRef}
-        graphData={{
-          nodes: graphData.nodes.map((n) => ({ ...n })),
-          links: graphData.edges.map((e) => ({ ...e })),
-        }}
+        graphData={stableGraphData}
         width={dimensions.width}
         height={dimensions.height}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
         nodeCanvasObject={nodeCanvasObject}
-        nodeCanvasObjectMode={() => "replace"}
-        linkColor={() => "rgba(255,255,255,0.10)"}
+        nodeCanvasObjectMode={NODE_CANVAS_MODE}
+        linkColor={LINK_COLOR}
         linkWidth={1}
         backgroundColor="#0d0d14"
         warmupTicks={80}
