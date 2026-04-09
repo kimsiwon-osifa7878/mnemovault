@@ -33,10 +33,23 @@ export async function readFile(
   return file.text();
 }
 
+export async function readFileAsBuffer(
+  root: FileSystemDirectoryHandle,
+  filePath: string
+): Promise<ArrayBuffer> {
+  const { dirParts, fileName } = splitPath(filePath);
+  const dir = dirParts.length > 0
+    ? await getNestedDirHandle(root, dirParts)
+    : root;
+  const fileHandle = await dir.getFileHandle(fileName);
+  const file = await fileHandle.getFile();
+  return file.arrayBuffer();
+}
+
 export async function writeFile(
   root: FileSystemDirectoryHandle,
   filePath: string,
-  content: string | ArrayBuffer | Uint8Array
+  content: string | ArrayBuffer
 ): Promise<void> {
   const { dirParts, fileName } = splitPath(filePath);
   const dir = dirParts.length > 0

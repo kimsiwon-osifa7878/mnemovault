@@ -1,4 +1,5 @@
-import { readFile, writeFile, fileExists } from "@/lib/storage/client-fs";
+import { readFile, readFileAsBuffer, writeFile, fileExists } from "@/lib/storage/client-fs";
+import { extractTextFromPdf } from "@/lib/utils/pdf";
 import { toSlug } from "@/lib/utils/markdown";
 import type { UncompiledFile, CompileFileResult, CompileLogEntry } from "./types";
 import type { IngestLLMResult } from "@/lib/llm/ingest";
@@ -122,8 +123,20 @@ export async function compileFile(
   try {
     // 1. Read raw file
     log(logs, "info", "Reading raw file", file.path);
-    const content = await readFile(root, file.path);
-    log(logs, "info", "File read OK", `${content.length} chars`);
+    let content: string;
+    if (file.fileName.toLowerCase().endsWith(".pdf")) {
+      log(logs, "info", "Detected PDF, extracting text...");
+      const buffer = await readFileAsBuffer(root, file.path);
+      content = await extractTextFromPdf(buffer);
+      log(logs, "info", "PDF text extracted", `${content.length} chars`);
+    } else {
+      content = await readFile(root, file.path);
+      log(logs, "info", "File read OK", `${content.length} chars`);
+    }
+
+    if (!content.trim()) {
+      throw new Error("No text content could be extracted from the file");
+    }
 
     // 2. Call LLM via API route
     const requestBody = {
