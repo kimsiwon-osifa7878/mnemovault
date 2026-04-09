@@ -46,12 +46,15 @@
 |--------|------|------|
 | Framework | Next.js (App Router) | SSR/SSG, API Routes, Vercel 네이티브 배포 |
 | 스타일링 | Tailwind CSS | 유틸리티 기반, 빠른 프로토타이핑 |
-| 마크다운 | react-markdown + remark/rehype | GFM 렌더링, `[[wikilink]]` 커스텀 파싱 |
-| 에디터 | @uiw/react-md-editor 또는 CodeMirror | 실시간 마크다운 편집 |
+| 마크다운 렌더링 | react-markdown + remark-gfm + rehype-highlight + rehype-raw | GFM 렌더링, 코드 하이라이팅, `[[wikilink]]` 커스텀 파싱 |
+| Frontmatter | gray-matter | YAML frontmatter 파싱/생성 |
+| 에디터 | @uiw/react-md-editor | 실시간 마크다운 편집 |
 | 그래프 | react-force-graph-2d | `[[Link]]` 관계 시각화 |
+| 검색 | fuse.js | 퍼지 검색 (사이드바 페이지 검색) |
+| 아이콘 | lucide-react | 일관된 아이콘 시스템 |
 | 스토리지 | 클라이언트 File System Access API | 브라우저에서 직접 로컬 파일 관리 |
 | LLM | OpenRouter + Ollama (확장 가능) | 다중 프로바이더, 무료 모델 지원 |
-| 상태관리 | Zustand | 경량, 문서·그래프·채팅 상태 관리 |
+| 상태관리 | Zustand | 경량, 문서·그래프·채팅 상태 관리 (localStorage/IndexedDB 영속화) |
 
 ---
 
@@ -89,7 +92,8 @@
 ### 문서 구조
 
 - 모든 위키 페이지는 **YAML frontmatter + 마크다운 본문**
-- 페이지 타입: `concept` | `entity` | `source` | `analysis` | `comparison` | `overview`
+- 페이지 타입 (구현 완료): `concept` | `entity` | `source` | `analysis` | `index` | `log`
+- 페이지 타입 (향후 확장 예정): `comparison` | `overview`
 - 교차 참조는 `[[위키링크]]` 문법 사용
 - 출처 추적: 모든 주장에 어떤 raw 소스에서 왔는지 기록
 - Confidence 태깅: high (다수 소스) | medium (단일 소스) | low (LLM 추론)
@@ -116,12 +120,14 @@ content/
 
 - TypeScript strict mode
 - 컴포넌트: 함수형 + hooks
+- 경로 별칭: `@/*` → `./src/*` (tsconfig paths)
 - 서버에서 파일 접근 불가 — 모든 위키 IO는 클라이언트(File System Access API)
 - 서버 API는 LLM 중계 전용
 - 모든 LLM 응답은 JSON으로 구조화 요청, 파싱 실패 시 재시도
+- LLM API 호출 시 `language` 파라미터 지원 (`"en"` | `"ko"`) — 위키 컴파일 및 쿼리 결과의 언어를 제어
 - 위키의 canonical form은 데이터베이스 레코드가 아니라 **git-friendly markdown 파일 집합**이다
 - 앱 내부 상태는 캐시/뷰 모델일 뿐이며, 가능하면 위키 파일 구조에서 재생성 가능해야 한다
-- 한국어 UI
+- 한국어 UI (LLM 출력 언어는 설정에서 en/ko 전환 가능)
 
 ---
 
