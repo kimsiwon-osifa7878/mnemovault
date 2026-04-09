@@ -62,6 +62,14 @@ function IDELayout() {
     fetchGraph();
   }, [fetchPages, fetchGraph]);
 
+  const handlePageSave = useCallback(() => {
+    fetchGraph();
+  }, [fetchGraph]);
+
+  const handlePageDelete = useCallback(() => {
+    fetchGraph();
+  }, [fetchGraph]);
+
   useEffect(() => {
     handlePageSelect("index");
   }, [handlePageSelect]);
@@ -82,7 +90,12 @@ function IDELayout() {
 
       {/* Editor */}
       <div className="flex-1 min-w-0">
-        <EditorPane backlinks={backlinks} onLinkClick={handlePageSelect} />
+        <EditorPane
+          backlinks={backlinks}
+          onLinkClick={handlePageSelect}
+          onSave={handlePageSave}
+          onDelete={handlePageDelete}
+        />
       </div>
 
       {/* Right Panel (Chat + Graph) */}
@@ -165,6 +178,7 @@ function IDELayout() {
             setShowNewPage(false);
             handlePageSelect(slug);
             fetchPages();
+            fetchGraph();
           }}
         />
       )}
