@@ -160,6 +160,52 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     fg?.zoomToFit(600, 50);
   }, [getForceGraph]);
 
+  // Measure container and respond to resize
+  useEffect(() => {
+    const measure = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  // Configure D3 forces whenever graph data changes
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg || graphData.nodes.length === 0) return;
+
+    const n = graphData.nodes.length;
+
+    // Stronger repulsion: scale with node count to prevent clustering
+    const charge = fg.d3Force("charge");
+    if (charge) {
+      const strength = -Math.min(500, 120 + n * 12);
+      charge.strength(strength);
+    }
+
+    // Longer link distance: more room between connected nodes
+    const link = fg.d3Force("link");
+    if (link) {
+      const distance = Math.min(180, 80 + n * 2);
+      link.distance(distance);
+    }
+
+    // Restart simulation so new forces take effect
+    fg.d3ReheatSimulation();
+  }, [graphData]);
+
+  // Zoom to fit the whole graph once simulation settles
+  const handleEngineStop = useCallback(() => {
+    fgRef.current?.zoomToFit(600, 50);
+  }, []);
+
   const handleNodeClick = useCallback(
     (node: NodeObject) => {
       if (node.id) {
