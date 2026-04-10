@@ -21,7 +21,7 @@ interface PromptFile {
   };
 }
 
-const PROMPT_PATH = path.join(process.cwd(), "src/lib/llm/prompts.json");
+const PROMPT_PATH = path.join(process.cwd(), "src/lib/llm/prompts.v2.json");
 let promptCache: Promise<PromptFile> | null = null;
 
 function assertPromptShape(data: unknown): asserts data is PromptFile {

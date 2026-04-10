@@ -5,7 +5,7 @@ import { LLMConfig } from "@/lib/llm/client";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { fileName, content, fileType, llmConfig, language } = body;
+    const { fileName, content, fileType, llmConfig, wikiContext, language } = body;
 
     if (!fileName || !content || !fileType) {
       return NextResponse.json(
@@ -19,7 +19,14 @@ export async function POST(request: Request) {
       : undefined;
 
     const lang = (language === "ko" ? "ko" : "en") as "en" | "ko";
-    const result = await processIngestWithLLM(fileName, content, fileType, config, lang);
+    const result = await processIngestWithLLM(
+      fileName,
+      content,
+      fileType,
+      config,
+      typeof wikiContext === "string" ? wikiContext : "",
+      lang
+    );
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
