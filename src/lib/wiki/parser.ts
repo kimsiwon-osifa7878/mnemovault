@@ -5,6 +5,9 @@ import { toSlug } from "@/lib/utils/markdown";
 
 const WIKILINK_REGEX = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
+/** Slugs excluded from the graph view (catalog / changelog only). */
+const GRAPH_EXCLUDED_SLUGS = new Set(["index", "log"]);
+
 export function parseWikilinks(content: string): WikiLink[] {
   const links: WikiLink[] = [];
   let match;
@@ -34,9 +37,10 @@ export function parseWikiPage(filename: string, rawContent: string): WikiPage {
 }
 
 export function buildGraphData(pages: WikiPage[]): GraphData {
-  const slugSet = new Set(pages.map((p) => p.slug));
+  const graphPages = pages.filter((p) => !GRAPH_EXCLUDED_SLUGS.has(p.slug));
+  const slugSet = new Set(graphPages.map((p) => p.slug));
 
-  const nodes: GraphNode[] = pages.map((p) => ({
+  const nodes: GraphNode[] = graphPages.map((p) => ({
     id: p.slug,
     label: p.frontmatter.title || p.slug,
     type: p.frontmatter.type || "concept",
@@ -45,10 +49,11 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
 
   const edges: GraphEdge[] = [];
 
-  for (const page of pages) {
+  for (const page of graphPages) {
     const links = parseWikilinks(page.content);
     for (const link of links) {
       const targetSlug = toSlug(link.target);
+      if (GRAPH_EXCLUDED_SLUGS.has(targetSlug)) continue;
       if (slugSet.has(targetSlug)) {
         edges.push({ source: page.slug, target: targetSlug });
         const sourceNode = nodes.find((n) => n.id === page.slug);
