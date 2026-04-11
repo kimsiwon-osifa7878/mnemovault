@@ -17,7 +17,16 @@ import { useGraphStore } from "@/stores/graph-store";
 import { useStorageStore } from "@/stores/storage-store";
 import { buildGraphData, parseWikilinks } from "@/lib/wiki/parser";
 import { toSlug } from "@/lib/utils/markdown";
-import { Network, AlertTriangle, PanelRightClose, PanelRight, Settings } from "lucide-react";
+import {
+  FileText,
+  Network,
+  AlertTriangle,
+  PanelRightClose,
+  PanelRight,
+  Settings,
+} from "lucide-react";
+
+type MainView = "text" | "graph";
 
 function IDELayout() {
   const { fetchPage, fetchPages, pages } = useWikiStore();
@@ -29,7 +38,7 @@ function IDELayout() {
   const [showLint, setShowLint] = useState(false);
   const [showLLMSettings, setShowLLMSettings] = useState(false);
   const [showStorageSettings, setShowStorageSettings] = useState(false);
-  const [showGraph, setShowGraph] = useState(true);
+  const [mainView, setMainView] = useState<MainView>("text");
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [backlinks, setBacklinks] = useState<string[]>([]);
 
@@ -100,42 +109,54 @@ function IDELayout() {
         />
       </div>
 
-      {/* Editor */}
-      <div className="flex-1 min-w-0">
-        <EditorPane
-          backlinks={backlinks}
-          onLinkClick={handlePageSelect}
-          onSave={handlePageSave}
-          onDelete={handlePageDelete}
-        />
+      {/* Main View (Text + Graph tabs) */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex items-center border-b border-white/10 bg-[#0d0d14]">
+          <button
+            onClick={() => setMainView("text")}
+            className={`flex items-center justify-center gap-1.5 px-4 py-2 text-xs ${
+              mainView === "text"
+                ? "text-white/80 border-b-2 border-blue-500"
+                : "text-white/30 hover:text-white/50"
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Text
+          </button>
+          <button
+            onClick={() => setMainView("graph")}
+            className={`flex items-center justify-center gap-1.5 px-4 py-2 text-xs ${
+              mainView === "graph"
+                ? "text-white/80 border-b-2 border-blue-500"
+                : "text-white/30 hover:text-white/50"
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" />
+            Graph
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">
+          {mainView === "text" ? (
+            <EditorPane
+              backlinks={backlinks}
+              onLinkClick={handlePageSelect}
+              onSave={handlePageSave}
+              onDelete={handlePageDelete}
+            />
+          ) : (
+            <GraphView onNodeClick={handlePageSelect} />
+          )}
+        </div>
       </div>
 
-      {/* Right Panel (Chat + Graph) */}
+      {/* Right Panel (Chat) */}
       {showRightPanel && (
         <div className="w-80 shrink-0 flex flex-col border-l border-white/10">
-          {/* Graph / Chat toggle */}
+          {/* Chat panel header */}
           <div className="flex items-center border-b border-white/10 bg-[#0d0d14]">
-            <button
-              onClick={() => setShowGraph(true)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs ${
-                showGraph
-                  ? "text-white/80 border-b-2 border-blue-500"
-                  : "text-white/30 hover:text-white/50"
-              }`}
-            >
-              <Network className="w-3.5 h-3.5" />
-              Graph
-            </button>
-            <button
-              onClick={() => setShowGraph(false)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs ${
-                !showGraph
-                  ? "text-white/80 border-b-2 border-blue-500"
-                  : "text-white/30 hover:text-white/50"
-              }`}
-            >
+            <div className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-white/70">
               Chat
-            </button>
+            </div>
             <button
               onClick={() => setShowLint(true)}
               className="px-2 py-2 text-white/30 hover:text-orange-400"
@@ -154,11 +175,7 @@ function IDELayout() {
 
           {/* Content */}
           <div className="flex-1 overflow-hidden">
-            {showGraph ? (
-              <GraphView onNodeClick={handlePageSelect} />
-            ) : (
-              <ChatPane onLinkClick={handlePageSelect} />
-            )}
+            <ChatPane onLinkClick={handlePageSelect} />
           </div>
         </div>
       )}
