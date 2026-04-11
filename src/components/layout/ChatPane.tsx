@@ -59,7 +59,7 @@ export default function ChatPane({ onLinkClick }: ChatPaneProps) {
         {messages.length === 0 && (
           <div className="text-center text-white/20 text-xs mt-8">
             <p>Ask questions about your wiki.</p>
-            <p className="mt-1">The current document context will be included automatically.</p>
+            <p className="mt-1">Context is selected from wiki index first, then matched to your query.</p>
           </div>
         )}
         {messages.map((msg) => (

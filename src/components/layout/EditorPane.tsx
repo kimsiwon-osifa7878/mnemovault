@@ -27,6 +27,7 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
 
   useEffect(() => {
     if (currentPage) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditContent(currentPage.rawContent);
       setHasChanges(false);
     }
