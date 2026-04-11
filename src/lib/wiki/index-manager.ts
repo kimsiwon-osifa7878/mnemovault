@@ -11,7 +11,7 @@ export function generateIndexContent(pages: WikiPage[]): string {
     return `- [[${p.frontmatter.title}]] — ${p.content.slice(0, 60).replace(/\n/g, " ")}... (sources: ${sourceCount}, updated: ${p.frontmatter.updated})`;
   };
 
-  let content = `---
+  const content = `---
 title: "Wiki Index"
 type: index
 created: 2026-04-06

@@ -58,8 +58,10 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
   // current values without being recreated on every state change
   const hoveredNodeRef = useRef<string | null>(null);
   const selectedNodeRef = useRef<string | null>(null);
-  hoveredNodeRef.current = hoveredNode;
-  selectedNodeRef.current = selectedNode;
+  useEffect(() => {
+    hoveredNodeRef.current = hoveredNode;
+    selectedNodeRef.current = selectedNode;
+  }, [hoveredNode, selectedNode]);
 
   const getForceGraph = useCallback((): ForceGraphInstance | null => {
     const current = fgRef.current as unknown;
@@ -263,7 +265,7 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
         : "rgba(255,255,255,0.5)";
       ctx.fillText(displayLabel, x, labelY);
     },
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs intentionally
+    []
   );
 
   if (graphData.nodes.length === 0) {
