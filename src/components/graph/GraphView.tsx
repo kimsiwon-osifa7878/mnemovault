@@ -25,6 +25,7 @@ const LINK_COLOR = () => "rgba(255,255,255,0.10)";
 
 interface GraphViewProps {
   onNodeClick: (slug: string) => void;
+  resizeToken?: number;
 }
 
 interface NodeObject {
@@ -46,7 +47,7 @@ interface ForceGraphInstance {
   zoomToFit: (ms?: number, padding?: number) => void;
 }
 
-export default function GraphView({ onNodeClick }: GraphViewProps) {
+export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) {
   const { graphData, selectedNode, setSelectedNode } = useGraphStore();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,8 +59,10 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
   // current values without being recreated on every state change
   const hoveredNodeRef = useRef<string | null>(null);
   const selectedNodeRef = useRef<string | null>(null);
-  hoveredNodeRef.current = hoveredNode;
-  selectedNodeRef.current = selectedNode;
+  useEffect(() => {
+    hoveredNodeRef.current = hoveredNode;
+    selectedNodeRef.current = selectedNode;
+  }, [hoveredNode, selectedNode]);
 
   const getForceGraph = useCallback((): ForceGraphInstance | null => {
     const current = fgRef.current as unknown;
@@ -159,6 +162,15 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
     const fg = getForceGraph();
     fg?.zoomToFit(600, 50);
   }, [getForceGraph]);
+
+  useEffect(() => {
+    if (!resizeToken) return;
+    const fg = getForceGraph();
+    if (!fg || stableGraphData.nodes.length === 0) return;
+    fg.d3ReheatSimulation();
+    const timer = window.setTimeout(() => fg.zoomToFit(400, 40), 120);
+    return () => window.clearTimeout(timer);
+  }, [getForceGraph, resizeToken, stableGraphData.nodes.length]);
 
   const handleNodeClick = useCallback(
     (node: NodeObject) => {
@@ -263,7 +275,7 @@ export default function GraphView({ onNodeClick }: GraphViewProps) {
         : "rgba(255,255,255,0.5)";
       ctx.fillText(displayLabel, x, labelY);
     },
-    [] // eslint-disable-line react-hooks/exhaustive-deps -- reads from refs intentionally
+    []
   );
 
   if (graphData.nodes.length === 0) {
