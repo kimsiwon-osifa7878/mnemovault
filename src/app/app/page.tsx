@@ -36,7 +36,7 @@ function IDELayout() {
   const [showStorageSettings, setShowStorageSettings] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [backlinks, setBacklinks] = useState<string[]>([]);
-  const [editorWidth, setEditorWidth] = useState(68); // percentage
+  const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const [chatHeight, setChatHeight] = useState(58); // percentage of right panel
   const dragModeRef = useRef<"editor" | "chat" | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -106,9 +106,9 @@ function IDELayout() {
         if (!workspace) return;
         const bounds = workspace.getBoundingClientRect();
         if (bounds.width <= 0) return;
-        const x = event.clientX - bounds.left;
-        const nextWidth = (x / bounds.width) * 100;
-        setEditorWidth(Math.max(35, Math.min(80, nextWidth)));
+        const nextWidth = bounds.right - event.clientX;
+        const maxWidth = Math.max(320, bounds.width - 360);
+        setRightPanelWidth(Math.max(320, Math.min(maxWidth, nextWidth)));
       }
 
       if (dragModeRef.current === "chat") {
@@ -159,8 +159,7 @@ function IDELayout() {
       <div ref={workspaceRef} className="flex-1 min-w-0 flex">
       {/* Main View (Text) */}
       <div
-        className="min-w-0 flex flex-col"
-        style={{ width: showRightPanel ? `${editorWidth}%` : undefined, flex: showRightPanel ? "none" : 1 }}
+        className="min-w-0 flex-1 flex flex-col"
       >
         <div className="flex-1 min-h-0">
           <EditorPane
@@ -188,7 +187,7 @@ function IDELayout() {
         <div
           id="right-stack-panel"
           className="min-w-[280px] shrink-0 flex flex-col border-l border-white/10"
-          style={{ width: `${100 - editorWidth}%` }}
+          style={{ width: `${rightPanelWidth}px` }}
         >
           {/* Chat panel header */}
           <div className="flex items-center border-b border-white/10 bg-[#0d0d14]">
