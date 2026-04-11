@@ -3,6 +3,7 @@ import { parseWikiPage, parseWikilinks } from "@/lib/wiki/parser";
 import { toSlug } from "@/lib/utils/markdown";
 import { appendLogEntry } from "@/lib/wiki/log-manager";
 import * as clientFs from "@/lib/storage/client-fs";
+import { WikiPage } from "@/types/wiki";
 import { useStorageStore } from "./storage-store";
 
 export interface ChatMessage {
@@ -36,10 +37,11 @@ interface ChatState {
 
 async function buildQueryContext(
   root: FileSystemDirectoryHandle,
+  question: string,
   currentDocument?: string
 ): Promise<string> {
   const files = await clientFs.listFiles(root, "wiki");
-  const pages = [];
+  const pages: WikiPage[] = [];
   for (const f of files) {
     try {
       const raw = await clientFs.readFile(root, f);
@@ -50,30 +52,73 @@ async function buildQueryContext(
     }
   }
 
-  let context = "";
+  const tokenize = (text: string): string[] =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .split(/\s+/)
+      .filter((token) => token.length >= 2);
+
+  const queryTokens = new Set(tokenize(question));
   const indexPage = pages.find((p) => p.slug === "index");
+  const indexLinks = indexPage ? parseWikilinks(indexPage.content).map((link) => toSlug(link.target)) : [];
+  const currentPage = currentDocument
+    ? pages.find((p) => p.slug === currentDocument)
+    : undefined;
+
+  const computeScore = (slug: string, title: string, content: string): number => {
+    const haystack = `${title} ${content.slice(0, 1200)}`.toLowerCase();
+    let score = 0;
+
+    for (const token of queryTokens) {
+      if (title.toLowerCase().includes(token)) score += 8;
+      if (haystack.includes(token)) score += 3;
+    }
+
+    if (slug === currentDocument) score += 20;
+    if (indexLinks.includes(slug)) score += 10;
+
+    return score;
+  };
+
+  const rankedPages = pages
+    .filter((p) => p.slug !== "index" && p.slug !== "log")
+    .map((p) => ({
+      page: p,
+      score: computeScore(p.slug, p.frontmatter.title, p.content),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  let context = "";
   if (indexPage) {
     context += `## Index\n${indexPage.content}\n\n`;
   }
 
-  if (currentDocument) {
-    const currentPage = pages.find((p) => p.slug === currentDocument);
-    if (currentPage) {
-      context += `## Current Document: ${currentPage.frontmatter.title}\n${currentPage.content}\n\n`;
-      const links = parseWikilinks(currentPage.content);
-      for (const link of links.slice(0, 5)) {
-        const targetSlug = toSlug(link.target);
-        const neighborPage = pages.find((p) => p.slug === targetSlug);
-        if (neighborPage) {
-          context += `## ${neighborPage.frontmatter.title}\n${neighborPage.content}\n\n`;
-        }
+  if (currentPage) {
+    context += `## Current Document: ${currentPage.frontmatter.title}\n${currentPage.content}\n\n`;
+    const links = parseWikilinks(currentPage.content);
+    for (const link of links.slice(0, 5)) {
+      const targetSlug = toSlug(link.target);
+      const neighborPage = pages.find((p) => p.slug === targetSlug);
+      if (neighborPage) {
+        context += `## Neighbor: ${neighborPage.frontmatter.title}\n${neighborPage.content}\n\n`;
       }
     }
   }
 
-  for (const page of pages.slice(0, 20)) {
-    if (page.slug === "index" || page.slug === "log") continue;
-    context += `## ${page.frontmatter.title} (${page.frontmatter.type})\n${page.content.slice(0, 300)}\n\n`;
+  const selectedPages = rankedPages
+    .filter(({ score }) => score > 0)
+    .slice(0, 12)
+    .map(({ page }) => page);
+
+  for (const page of selectedPages) {
+    context += `## Relevant: ${page.frontmatter.title} (${page.frontmatter.type})\n${page.content.slice(0, 800)}\n\n`;
+  }
+
+  if (selectedPages.length === 0) {
+    for (const page of rankedPages.slice(0, 8)) {
+      context += `## Candidate: ${page.page.frontmatter.title} (${page.page.frontmatter.type})\n${page.page.content.slice(0, 400)}\n\n`;
+    }
   }
 
   return context;
@@ -105,7 +150,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!root) throw new Error("Storage not connected");
 
       // Build context on client
-      const context = await buildQueryContext(root, currentDocument);
+      const context = await buildQueryContext(root, question, currentDocument);
 
       // Call server for LLM only
       const res = await fetch("/api/llm/query", {

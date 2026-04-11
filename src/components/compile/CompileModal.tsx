@@ -126,6 +126,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
     if (progress?.currentFile && phase === "compiling") {
       const currentFile = files.find((f) => f.fileName === progress.currentFile);
       if (currentFile) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setExpandedFiles((prev) => {
           const next = new Set(prev);
           next.add(currentFile.path);
@@ -251,7 +252,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                 <span>{progress.completed} / {progress.total} files</span>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3 h-3" />
-                  {formatElapsed(phase === "done" ? elapsed : Date.now() - progress.startedAt)}
+                  {formatElapsed(elapsed)}
                 </span>
               </div>
               <div className="h-2 bg-white/5 rounded-full overflow-hidden">
