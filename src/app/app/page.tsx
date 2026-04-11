@@ -19,10 +19,14 @@ import { buildGraphData, parseWikilinks } from "@/lib/wiki/parser";
 import { toSlug } from "@/lib/utils/markdown";
 import {
   AlertTriangle,
+  MessageSquare,
+  Network,
   PanelRightClose,
   PanelRight,
   Settings,
 } from "lucide-react";
+
+type RightTab = "chat" | "graph";
 
 function IDELayout() {
   const { fetchPage, fetchPages, pages } = useWikiStore();
@@ -35,10 +39,10 @@ function IDELayout() {
   const [showLLMSettings, setShowLLMSettings] = useState(false);
   const [showStorageSettings, setShowStorageSettings] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [rightTab, setRightTab] = useState<RightTab>("chat");
   const [backlinks, setBacklinks] = useState<string[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
-  const [chatHeight, setChatHeight] = useState(58); // percentage of right panel
-  const dragModeRef = useRef<"editor" | "chat" | null>(null);
+  const dragModeRef = useRef<"editor" | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
   const handlePageSelect = useCallback(
@@ -111,15 +115,6 @@ function IDELayout() {
         setRightPanelWidth(Math.max(320, Math.min(maxWidth, nextWidth)));
       }
 
-      if (dragModeRef.current === "chat") {
-        const rightPanel = document.getElementById("right-stack-panel");
-        if (!rightPanel) return;
-        const bounds = rightPanel.getBoundingClientRect();
-        if (bounds.height <= 0) return;
-        const y = event.clientY - bounds.top;
-        const nextHeight = (y / bounds.height) * 100;
-        setChatHeight(Math.max(25, Math.min(75, nextHeight)));
-      }
     };
 
     const stopDrag = () => {
@@ -136,9 +131,9 @@ function IDELayout() {
     };
   }, [showRightPanel]);
 
-  const beginDrag = useCallback((mode: "editor" | "chat") => {
+  const beginDrag = useCallback((mode: "editor") => {
     dragModeRef.current = mode;
-    document.body.style.cursor = mode === "editor" ? "col-resize" : "row-resize";
+    document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
   }, []);
 
@@ -182,17 +177,38 @@ function IDELayout() {
         />
       )}
 
-      {/* Right Panel (Chat + Graph) */}
+      {/* Right Panel (Chat / Graph tabs) */}
       {showRightPanel && (
         <div
           id="right-stack-panel"
           className="min-w-[280px] shrink-0 flex flex-col border-l border-white/10"
           style={{ width: `${rightPanelWidth}px` }}
         >
-          {/* Chat panel header */}
+          {/* Tab header */}
           <div className="flex items-center border-b border-white/10 bg-[#0d0d14]">
-            <div className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-white/70">
-              Chat
+            <div className="flex-1 flex items-center">
+              <button
+                onClick={() => setRightTab("chat")}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors ${
+                  rightTab === "chat"
+                    ? "text-white/90 border-blue-500"
+                    : "text-white/35 border-transparent hover:text-white/60"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Chat
+              </button>
+              <button
+                onClick={() => setRightTab("graph")}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 transition-colors ${
+                  rightTab === "graph"
+                    ? "text-white/90 border-blue-500"
+                    : "text-white/35 border-transparent hover:text-white/60"
+                }`}
+              >
+                <Network className="w-3.5 h-3.5" />
+                Graph
+              </button>
             </div>
             <button
               onClick={() => setShowLint(true)}
@@ -210,9 +226,12 @@ function IDELayout() {
             </button>
           </div>
 
-          {/* Chat */}
-          <div className="min-h-0 overflow-hidden" style={{ height: `${chatHeight}%` }}>
-            <ChatPane onLinkClick={handlePageSelect} />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {rightTab === "chat" ? (
+              <ChatPane onLinkClick={handlePageSelect} />
+            ) : (
+              <GraphView onNodeClick={handlePageSelect} resizeToken={rightPanelWidth} />
+            )}
           </div>
 
           {/* Divider: Chat ↕ Graph */}
