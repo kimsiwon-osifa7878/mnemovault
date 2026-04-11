@@ -233,6 +233,20 @@ function IDELayout() {
               <GraphView onNodeClick={handlePageSelect} resizeToken={rightPanelWidth} />
             )}
           </div>
+
+          {/* Divider: Chat ↕ Graph */}
+          <div
+            className="h-1.5 cursor-row-resize bg-white/5 hover:bg-blue-500/40 transition-colors"
+            onPointerDown={() => beginDrag("chat")}
+            role="separator"
+            aria-label="Resize chat and graph panel"
+            aria-orientation="horizontal"
+          />
+
+          {/* Graph */}
+          <div className="min-h-0 overflow-hidden" style={{ height: `${100 - chatHeight}%` }}>
+            <GraphView onNodeClick={handlePageSelect} />
+          </div>
         </div>
       )}
       </div>
