@@ -7,6 +7,25 @@ import { ensureDirectoryStructure } from "@/lib/storage/client-fs";
 const DB_NAME = "mnemovault-storage";
 const STORE_NAME = "handles";
 const HANDLE_KEY = "dirHandle";
+const RESTORE_TIMEOUT_MS = 5000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error("restore_timeout"));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -90,17 +109,27 @@ export const useStorageStore = create<StorageState>((set, get) => ({
 
   restoreFolder: async () => {
     try {
-      const handle = await loadHandleFromDB();
+      const handle = await withTimeout(loadHandleFromDB(), RESTORE_TIMEOUT_MS);
       if (!handle) return false;
 
-      const permission = await handle.requestPermission({ mode: "readwrite" });
-      if (permission !== "granted") {
+      const permission = await withTimeout(
+        handle.queryPermission({ mode: "readwrite" }),
+        RESTORE_TIMEOUT_MS
+      );
+      if (permission === "denied") {
         set({ error: "Permission denied. Please select the folder again." });
         return false;
       }
+      if (permission === "prompt") {
+        // Avoid boot-time permission prompt loops; ask user via Pick Folder button.
+        return false;
+      }
 
-      await ensureDirectoryStructure(handle);
-      const contentHandle = await handle.getDirectoryHandle("content");
+      await withTimeout(ensureDirectoryStructure(handle), RESTORE_TIMEOUT_MS);
+      const contentHandle = await withTimeout(
+        handle.getDirectoryHandle("content"),
+        RESTORE_TIMEOUT_MS
+      );
       set({
         dirHandle: handle,
         contentHandle,

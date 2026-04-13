@@ -61,6 +61,17 @@ export async function writeFile(
   await writable.close();
 }
 
+export async function appendFile(
+  root: FileSystemDirectoryHandle,
+  filePath: string,
+  content: string
+): Promise<void> {
+  const existing = (await fileExists(root, filePath))
+    ? await readFile(root, filePath)
+    : "";
+  await writeFile(root, filePath, `${existing}${content}`);
+}
+
 export async function deleteFile(
   root: FileSystemDirectoryHandle,
   filePath: string
@@ -165,10 +176,13 @@ export async function fileExists(
 export async function readJsonFile(
   root: FileSystemDirectoryHandle,
   filePath: string
-): Promise<Record<string, string>> {
+): Promise<Record<string, unknown>> {
   try {
     const content = await readFile(root, filePath);
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -189,6 +203,8 @@ export async function ensureDirectoryStructure(
     ["content", "wiki", "sources"],
     ["content", "wiki", "analyses"],
     ["content", "meta"],
+    ["content", "meta", "compile-logs"],
+    ["content", "meta", "llm-debug"],
   ];
 
   for (const parts of dirs) {

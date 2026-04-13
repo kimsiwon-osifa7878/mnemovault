@@ -8,14 +8,23 @@ export interface LLMConfig {
   ollamaUrl?: string;
 }
 
+export interface LLMCallOptions {
+  requireJson?: boolean;
+  temperature?: number;
+}
+
+export interface LLMStreamChunk {
+  text: string;
+}
+
 const DEFAULT_CONFIG: LLMConfig = {
   provider: "openrouter",
   model: "openrouter/free",
 };
 
-const DEFAULT_OPENROUTER_TIMEOUT_MS = 120_000;
+const DEFAULT_OPENROUTER_TIMEOUT_MS = 90_000;
 const DEFAULT_OLLAMA_TIMEOUT_MS = 900_000; // 15 minutes for slow local models
-const DEFAULT_OPENROUTER_RETRIES = 1;
+const DEFAULT_OPENROUTER_RETRIES = 0;
 const DEFAULT_OLLAMA_RETRIES = 0;
 
 export interface LLMRequestPolicy {
@@ -96,6 +105,70 @@ async function llFetch(
   });
 }
 
+async function* readTextLines(
+  response: Awaited<ReturnType<typeof undiciFetch>>
+): AsyncGenerator<string> {
+  if (!response.body) {
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      yield line;
+    }
+  }
+
+  if (buffer) {
+    yield buffer;
+  }
+}
+
+async function* readSseDataLines(
+  response: Awaited<ReturnType<typeof undiciFetch>>
+): AsyncGenerator<string> {
+  let eventData: string[] = [];
+
+  for await (const line of readTextLines(response)) {
+    if (!line.trim()) {
+      if (eventData.length > 0) {
+        yield eventData.join("\n");
+        eventData = [];
+      }
+      continue;
+    }
+
+    if (line.startsWith("data:")) {
+      eventData.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (eventData.length > 0) {
+    yield eventData.join("\n");
+  }
+}
+
+async function* readNdjsonLines(
+  response: Awaited<ReturnType<typeof undiciFetch>>
+): AsyncGenerator<string> {
+  for await (const line of readTextLines(response)) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      yield trimmed;
+    }
+  }
+}
+
 async function withRetries<T>(
   policy: LLMRequestPolicy,
   operation: (attempt: number) => Promise<T>
@@ -122,7 +195,8 @@ async function callOpenRouter(
   userMessage: string,
   model: string,
   maxTokens: number,
-  policy: LLMRequestPolicy
+  policy: LLMRequestPolicy,
+  options?: LLMCallOptions
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY || "";
   const modelId = toOpenRouterModelId(model);
@@ -143,6 +217,12 @@ async function callOpenRouter(
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
+          ...(options?.requireJson
+            ? { response_format: { type: "json_object" } }
+            : {}),
+          ...(typeof options?.temperature === "number"
+            ? { temperature: options.temperature }
+            : {}),
           max_tokens: maxTokens,
         }),
       },
@@ -168,13 +248,84 @@ async function callOpenRouter(
   });
 }
 
+async function* callOpenRouterStream(
+  systemPrompt: string,
+  userMessage: string,
+  model: string,
+  maxTokens: number,
+  policy: LLMRequestPolicy,
+  options?: LLMCallOptions
+): AsyncGenerator<LLMStreamChunk> {
+  const apiKey = process.env.OPENROUTER_API_KEY || "";
+  const modelId = toOpenRouterModelId(model);
+
+  const response = await llFetch(
+    "https://openrouter.ai/api/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      signal: buildTimeoutSignal(policy.timeoutMs),
+      body: JSON.stringify({
+        model: modelId,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        stream: true,
+        ...(options?.requireJson
+          ? { response_format: { type: "json_object" } }
+          : {}),
+        ...(typeof options?.temperature === "number"
+          ? { temperature: options.temperature }
+          : {}),
+        max_tokens: maxTokens,
+      }),
+    },
+    policy
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new LLMRequestError(
+      "upstream_http_error",
+      `OpenRouter API error: ${response.status} ${errorText}`,
+      {
+        status: response.status,
+        retryable: response.status === 429 || response.status >= 500,
+      }
+    );
+  }
+
+  for await (const dataLine of readSseDataLines(response)) {
+    if (dataLine === "[DONE]") {
+      break;
+    }
+
+    try {
+      const payload = JSON.parse(dataLine) as {
+        choices?: { delta?: { content?: string } }[];
+      };
+      const text = payload.choices?.[0]?.delta?.content;
+      if (typeof text === "string" && text.length > 0) {
+        yield { text };
+      }
+    } catch {
+      continue;
+    }
+  }
+}
+
 async function callOllama(
   systemPrompt: string,
   userMessage: string,
   model: string,
   baseUrl: string,
   maxTokens: number,
-  policy: LLMRequestPolicy
+  policy: LLMRequestPolicy,
+  options?: LLMCallOptions
 ): Promise<string> {
   return withRetries(policy, async () => {
     const response = await llFetch(
@@ -189,9 +340,13 @@ async function callOllama(
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
           ],
+          ...(options?.requireJson ? { format: "json" } : {}),
           stream: false,
           options: {
             num_predict: maxTokens,
+            ...(typeof options?.temperature === "number"
+              ? { temperature: options.temperature }
+              : {}),
           },
         }),
       },
@@ -215,19 +370,136 @@ async function callOllama(
   });
 }
 
+async function* callOllamaStream(
+  systemPrompt: string,
+  userMessage: string,
+  model: string,
+  baseUrl: string,
+  maxTokens: number,
+  policy: LLMRequestPolicy,
+  options?: LLMCallOptions
+): AsyncGenerator<LLMStreamChunk> {
+  const response = await llFetch(
+    `${baseUrl}/api/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: buildTimeoutSignal(policy.timeoutMs),
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        ...(options?.requireJson ? { format: "json" } : {}),
+        stream: true,
+        options: {
+          num_predict: maxTokens,
+          ...(typeof options?.temperature === "number"
+            ? { temperature: options.temperature }
+            : {}),
+        },
+      }),
+    },
+    policy
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new LLMRequestError(
+      "upstream_http_error",
+      `Ollama API error: ${response.status} ${errorText}`,
+      {
+        status: response.status,
+        retryable: response.status >= 500,
+      }
+    );
+  }
+
+  for await (const line of readNdjsonLines(response)) {
+    try {
+      const payload = JSON.parse(line) as {
+        message?: { content?: string };
+        done?: boolean;
+      };
+
+      const text = payload.message?.content;
+      if (typeof text === "string" && text.length > 0) {
+        yield { text };
+      }
+
+      if (payload.done) {
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+}
+
 export async function callLLM(
   systemPrompt: string,
   userMessage: string,
   maxTokens: number = 4096,
-  config?: LLMConfig
+  config?: LLMConfig,
+  options?: LLMCallOptions
 ): Promise<string> {
   const cfg = config || DEFAULT_CONFIG;
   const policy = resolveLLMRequestPolicy(cfg);
 
   if (cfg.provider === "ollama") {
     const baseUrl = cfg.ollamaUrl || "http://localhost:11434";
-    return callOllama(systemPrompt, userMessage, cfg.model, baseUrl, maxTokens, policy);
+    return callOllama(
+      systemPrompt,
+      userMessage,
+      cfg.model,
+      baseUrl,
+      maxTokens,
+      policy,
+      options
+    );
   }
 
-  return callOpenRouter(systemPrompt, userMessage, cfg.model, maxTokens, policy);
+  return callOpenRouter(
+    systemPrompt,
+    userMessage,
+    cfg.model,
+    maxTokens,
+    policy,
+    options
+  );
+}
+
+export async function* callLLMStream(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens: number = 4096,
+  config?: LLMConfig,
+  options?: LLMCallOptions
+): AsyncGenerator<LLMStreamChunk> {
+  const cfg = config || DEFAULT_CONFIG;
+  const policy = resolveLLMRequestPolicy(cfg);
+
+  if (cfg.provider === "ollama") {
+    const baseUrl = cfg.ollamaUrl || "http://localhost:11434";
+    yield* callOllamaStream(
+      systemPrompt,
+      userMessage,
+      cfg.model,
+      baseUrl,
+      maxTokens,
+      policy,
+      options
+    );
+    return;
+  }
+
+  yield* callOpenRouterStream(
+    systemPrompt,
+    userMessage,
+    cfg.model,
+    maxTokens,
+    policy,
+    options
+  );
 }

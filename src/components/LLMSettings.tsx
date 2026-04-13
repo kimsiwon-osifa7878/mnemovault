@@ -27,6 +27,9 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const [isFetching, setIsFetching] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<"unknown" | "connected" | "error">("unknown");
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+  const [testMessage, setTestMessage] = useState<string>("");
+  const [streamTestStatus, setStreamTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+  const [streamTestMessage, setStreamTestMessage] = useState<string>("");
   const [tempUrl, setTempUrl] = useState(ollamaUrl);
 
   const fetchOpenRouterModels = async () => {
@@ -40,24 +43,93 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
     }
   };
 
-  const testModel = async (model: string) => {
+  const testModel = async (
+    nextProvider: "openrouter" | "ollama",
+    model: string,
+    nextOllamaUrl?: string
+  ) => {
     setTestStatus("testing");
+    setTestMessage("");
+    console.info("[LLMSettings] model test started", {
+      provider: nextProvider,
+      model,
+      ollamaUrl: nextOllamaUrl,
+    });
     try {
       const res = await fetch("/api/llm/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({
+          provider: nextProvider,
+          model,
+          ollamaUrl: nextOllamaUrl,
+        }),
       });
       const data = await res.json();
+      console.info("[LLMSettings] model test finished", data);
       setTestStatus(data.status === "ok" ? "ok" : "fail");
+      if (data.status === "ok") {
+        setTestMessage(`Connected (${data.elapsedMs}ms)`);
+      } else if (data.rateLimited) {
+        setTestMessage("Rate-limited upstream");
+      } else {
+        setTestMessage(data.message || "Model compatibility test failed");
+      }
     } catch {
+      console.error("[LLMSettings] model test request failed", {
+        provider: nextProvider,
+        model,
+      });
       setTestStatus("fail");
+      setTestMessage("Model compatibility test failed");
+    }
+  };
+
+  const runStreamTest = async (
+    nextProvider: "openrouter" | "ollama",
+    model: string,
+    nextOllamaUrl?: string
+  ) => {
+    setStreamTestStatus("testing");
+    setStreamTestMessage("");
+    console.info("[LLMSettings] stream test started", {
+      provider: nextProvider,
+      model,
+      ollamaUrl: nextOllamaUrl,
+    });
+    try {
+      const res = await fetch("/api/llm/stream-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: nextProvider,
+          model,
+          ollamaUrl: nextOllamaUrl,
+        }),
+      });
+      const data = await res.json();
+      console.info("[LLMSettings] stream test finished", data);
+      setStreamTestStatus(data.status === "ok" ? "ok" : "fail");
+      if (data.status === "ok") {
+        setStreamTestMessage(`Stream OK (${data.elapsedMs}ms)`);
+      } else if (data.rateLimited) {
+        setStreamTestMessage("Rate-limited upstream");
+      } else {
+        setStreamTestMessage(data.message || "Stream test failed");
+      }
+    } catch {
+      console.error("[LLMSettings] stream test request failed", {
+        provider: nextProvider,
+        model,
+      });
+      setStreamTestStatus("fail");
+      setStreamTestMessage("Stream test failed");
     }
   };
 
   const handleOpenRouterModelChange = (model: string) => {
     setOpenRouterModel(model);
-    testModel(model);
+    testModel("openrouter", model);
   };
 
   const fetchOllamaModels = async (url: string) => {
@@ -88,6 +160,9 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
       fetchOllamaModels(ollamaUrl);
     }
     setTestStatus("idle");
+    setTestMessage("");
+    setStreamTestStatus("idle");
+    setStreamTestMessage("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
@@ -211,10 +286,33 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   </span>
                 )}
               </div>
+              {testMessage && (
+                <p className={`text-[10px] mt-1 ${testStatus === "ok" ? "text-emerald-400/70" : "text-red-400/70"}`}>
+                  {testMessage}
+                </p>
+              )}
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => runStreamTest("openrouter", openrouterModel)}
+                disabled={streamTestStatus === "testing"}
+                className="px-3 py-2 rounded text-xs bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {streamTestStatus === "testing" && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                )}
+                Stream Test
+              </button>
+              {streamTestMessage && (
+                <p className={`text-[10px] mt-1 ${streamTestStatus === "ok" ? "text-emerald-400/70" : "text-red-400/70"}`}>
+                  {streamTestMessage}
+                </p>
+              )}
             </div>
             <p className="text-[10px] text-white/30">
               API key is configured via OPENROUTER_API_KEY environment variable.
-              Models loaded from OPENROUTER_FREE_MODELS.
+              Models loaded from OPENROUTER_FREE_MODELS. The status icon runs a lightweight upstream availability check.
             </p>
           </div>
         )}
@@ -287,6 +385,24 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
             <p className="text-[10px] text-white/30">
               No API key required. Ollama runs locally on your machine.
             </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => runStreamTest("ollama", ollamaModel, tempUrl)}
+                disabled={streamTestStatus === "testing"}
+                className="px-3 py-2 rounded text-xs bg-white/5 text-white/70 hover:bg-white/10 disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {streamTestStatus === "testing" && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                )}
+                Stream Test
+              </button>
+              {streamTestMessage && (
+                <p className={`text-[10px] mt-1 ${streamTestStatus === "ok" ? "text-emerald-400/70" : "text-red-400/70"}`}>
+                  {streamTestMessage}
+                </p>
+              )}
+            </div>
           </div>
         )}
 

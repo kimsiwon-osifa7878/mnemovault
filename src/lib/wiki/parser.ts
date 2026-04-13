@@ -2,8 +2,10 @@ import matter from "gray-matter";
 import { WikiPage, WikiLink, Frontmatter } from "@/types/wiki";
 import { GraphNode, GraphEdge, GraphData } from "@/types/graph";
 import { toSlug } from "@/lib/utils/markdown";
+import type { ClaimResult, EdgeResult } from "@/lib/llm/ingest";
 
 const WIKILINK_REGEX = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+const EVIDENCE_BLOCK_REGEX = /```mnemovault-evidence\s*([\s\S]*?)```/gi;
 
 /** Slugs excluded from the graph view (catalog / changelog only). */
 const GRAPH_EXCLUDED_SLUGS = new Set(["index", "log"]);
@@ -30,10 +32,70 @@ export function parseWikiPage(filename: string, rawContent: string): WikiPage {
   return {
     slug,
     filename,
+    path: `wiki/${filename}`,
+    editable: true,
+    sourceKind: "wiki",
     frontmatter: data as Frontmatter,
     content: content.trim(),
     rawContent,
   };
+}
+
+export function createRawWorkspacePage(
+  filePath: string,
+  rawContent: string
+): WikiPage {
+  const normalized = filePath.replace(/\\/g, "/");
+  const filename = normalized.split("/").pop() || normalized;
+  const slug = normalized.replace(/[/.]/g, "-");
+  const today = new Date().toISOString().split("T")[0];
+
+  return {
+    slug,
+    filename,
+    path: normalized,
+    editable: false,
+    sourceKind: normalized.startsWith("meta/") ? "meta" : "wiki",
+    frontmatter: {
+      title: filename,
+      type: "log",
+      created: today,
+      updated: today,
+    },
+    content: rawContent,
+    rawContent,
+  };
+}
+
+export function parseEvidenceBlock(rawContent: string): {
+  claims: ClaimResult[];
+  edges: EdgeResult[];
+} {
+  const claims: ClaimResult[] = [];
+  const edges: EdgeResult[] = [];
+
+  for (const match of rawContent.matchAll(EVIDENCE_BLOCK_REGEX)) {
+    if (!match[1]) continue;
+
+    try {
+      const parsed = JSON.parse(match[1]) as {
+        claims?: ClaimResult[];
+        edges?: EdgeResult[];
+      };
+
+      if (Array.isArray(parsed.claims)) {
+        claims.push(...parsed.claims);
+      }
+
+      if (Array.isArray(parsed.edges)) {
+        edges.push(...parsed.edges);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { claims, edges };
 }
 
 export function buildGraphData(pages: WikiPage[]): GraphData {
@@ -47,7 +109,28 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
     linkCount: 0,
   }));
 
-  const edges: GraphEdge[] = [];
+  const edgeMap = new Map<string, GraphEdge>();
+
+  const upsertEdge = (edge: GraphEdge) => {
+    const key = `${edge.source}::${edge.target}`;
+    const existing = edgeMap.get(key);
+    if (!existing) {
+      edgeMap.set(key, edge);
+      return;
+    }
+
+    edgeMap.set(key, {
+      ...existing,
+      ...edge,
+      relation: edge.relation || existing.relation,
+      evidenceType: edge.evidenceType || existing.evidenceType,
+      confidence:
+        typeof edge.confidence === "number"
+          ? edge.confidence
+          : existing.confidence,
+      sourceRef: edge.sourceRef || existing.sourceRef,
+    });
+  };
 
   for (const page of graphPages) {
     const links = parseWikilinks(page.content);
@@ -55,16 +138,37 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
       const targetSlug = toSlug(link.target);
       if (GRAPH_EXCLUDED_SLUGS.has(targetSlug)) continue;
       if (slugSet.has(targetSlug)) {
-        edges.push({ source: page.slug, target: targetSlug });
+        upsertEdge({ source: page.slug, target: targetSlug });
         const sourceNode = nodes.find((n) => n.id === page.slug);
         const targetNode = nodes.find((n) => n.id === targetSlug);
         if (sourceNode) sourceNode.linkCount++;
         if (targetNode) targetNode.linkCount++;
       }
     }
+
+    const evidence = parseEvidenceBlock(page.rawContent);
+    for (const edge of evidence.edges) {
+      const sourceSlug = toSlug(edge.source_page);
+      const targetSlug = toSlug(edge.target_page);
+      if (GRAPH_EXCLUDED_SLUGS.has(sourceSlug) || GRAPH_EXCLUDED_SLUGS.has(targetSlug)) {
+        continue;
+      }
+      if (!slugSet.has(sourceSlug) || !slugSet.has(targetSlug)) {
+        continue;
+      }
+
+      upsertEdge({
+        source: sourceSlug,
+        target: targetSlug,
+        relation: edge.relation,
+        evidenceType: edge.evidence_type,
+        confidence: edge.confidence,
+        sourceRef: edge.source_ref,
+      });
+    }
   }
 
-  return { nodes, edges };
+  return { nodes, edges: Array.from(edgeMap.values()) };
 }
 
 export function getBacklinks(

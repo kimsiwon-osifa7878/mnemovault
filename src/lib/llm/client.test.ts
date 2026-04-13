@@ -32,10 +32,10 @@ describe("resolveLLMRequestPolicy", () => {
     expect(policy.maxRetries).toBe(0);
   });
 
-  it("uses shorter timeout and one retry by default for openrouter", () => {
+  it("uses shorter timeout and no retry by default for openrouter", () => {
     const policy = resolveLLMRequestPolicy(cfg("openrouter"));
-    expect(policy.timeoutMs).toBe(120_000);
-    expect(policy.maxRetries).toBe(1);
+    expect(policy.timeoutMs).toBe(90_000);
+    expect(policy.maxRetries).toBe(0);
   });
 
   it("allows disabling timeout with 0", () => {

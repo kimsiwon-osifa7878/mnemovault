@@ -21,7 +21,6 @@ const LEGEND_TYPES = ["concept", "entity", "source", "analysis"] as const;
 
 // Stable function references to avoid re-renders from inline arrow functions
 const NODE_CANVAS_MODE = () => "replace" as const;
-const LINK_COLOR = () => "rgba(255,255,255,0.10)";
 
 interface GraphViewProps {
   onNodeClick: (slug: string) => void;
@@ -35,6 +34,15 @@ interface NodeObject {
   linkCount?: number;
   x?: number;
   y?: number;
+}
+
+interface LinkObject {
+  source?: string | number | { id?: string | number };
+  target?: string | number | { id?: string | number };
+  relation?: string;
+  evidenceType?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
+  confidence?: number;
+  sourceRef?: string;
 }
 
 interface ForceGraphInstance {
@@ -187,6 +195,32 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
     setHoveredNode(node?.id ? String(node.id) : null);
   }, []);
 
+  const linkColor = useCallback((link: LinkObject) => {
+    switch (link.evidenceType) {
+      case "EXTRACTED":
+        return "rgba(96,165,250,0.55)";
+      case "INFERRED":
+        return "rgba(251,191,36,0.5)";
+      case "AMBIGUOUS":
+        return "rgba(248,113,113,0.45)";
+      default:
+        return "rgba(255,255,255,0.10)";
+    }
+  }, []);
+
+  const linkWidth = useCallback((link: LinkObject) => {
+    if (link.evidenceType === "EXTRACTED") return 1.8;
+    if (link.evidenceType === "INFERRED") return 1.4;
+    if (link.evidenceType === "AMBIGUOUS") return 1.2;
+    return 1;
+  }, []);
+
+  const linkLineDash = useCallback((link: LinkObject) => {
+    if (link.evidenceType === "INFERRED") return [5, 4];
+    if (link.evidenceType === "AMBIGUOUS") return [2, 6];
+    return null;
+  }, []);
+
   const nodeCanvasObject = useCallback(
     (node: NodeObject, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const label = node.label || String(node.id ?? "");
@@ -314,8 +348,9 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
         onNodeHover={handleNodeHover}
         nodeCanvasObject={nodeCanvasObject}
         nodeCanvasObjectMode={NODE_CANVAS_MODE}
-        linkColor={LINK_COLOR}
-        linkWidth={1}
+        linkColor={linkColor}
+        linkWidth={linkWidth}
+        linkLineDash={linkLineDash}
         backgroundColor="#0d0d14"
         warmupTicks={80}
         cooldownTicks={300}
@@ -340,6 +375,19 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
             <span className="text-[9px] text-white/35 capitalize">{type}</span>
           </div>
         ))}
+        <div className="h-px bg-white/10 my-1" />
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-px bg-[#60a5fa]" />
+          <span className="text-[9px] text-white/35">Extracted</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-px border-t border-dashed border-amber-300" />
+          <span className="text-[9px] text-white/35">Inferred</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3 h-px border-t border-dashed border-red-400 opacity-70" />
+          <span className="text-[9px] text-white/35">Ambiguous</span>
+        </div>
       </div>
 
       {/* Node count badge */}

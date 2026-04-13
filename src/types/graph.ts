@@ -8,6 +8,10 @@ export interface GraphNode {
 export interface GraphEdge {
   source: string;
   target: string;
+  relation?: string;
+  evidenceType?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
+  confidence?: number;
+  sourceRef?: string;
 }
 
 export interface GraphData {
