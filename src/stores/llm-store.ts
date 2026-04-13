@@ -25,7 +25,7 @@ export const useLLMStore = create<LLMState>()(
     (set, get) => ({
       provider: "openrouter",
       openrouterModel: "openrouter/free",
-      ollamaModel: "gemma4:e4b",
+      ollamaModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL || "gemma4:e4b",
       ollamaUrl: "http://localhost:11434",
       language: "en",
 
