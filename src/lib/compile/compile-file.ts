@@ -34,6 +34,7 @@ interface PageEvidence {
 
 interface CompileFileHooks {
   emitLog?: (entry: CompileLogEntry) => Promise<void> | void;
+  emitStreamChunk?: (filePath: string, chunk: string) => Promise<void> | void;
 }
 
 function buildFrontmatter(fields: Record<string, unknown>): string {
@@ -557,6 +558,7 @@ export async function compileFile(
             const payload = JSON.parse(message.data) as { text?: string };
             const text = payload.text || "";
             rawResponse += text;
+            await hooks?.emitStreamChunk?.(file.path, text);
             await log(
               "response",
               "llm_stream",

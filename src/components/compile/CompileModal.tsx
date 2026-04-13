@@ -102,6 +102,25 @@ function LogEntryRow({ entry }: { entry: CompileLogEntry }) {
   );
 }
 
+function StreamTextPanel({
+  content,
+  isLive,
+}: {
+  content: string;
+  isLive: boolean;
+}) {
+  return (
+    <div className="px-3 pt-2 pb-2 border-t border-white/5">
+      <div className="text-[10px] uppercase tracking-wider text-white/35 mb-2">
+        {isLive ? "LLM Response (live)" : "LLM Response (partial)"}
+      </div>
+      <pre className="rounded bg-black/40 border border-white/5 px-3 py-2 text-[11px] text-white/70 whitespace-pre-wrap break-words overflow-x-auto max-h-64">
+        {content}
+      </pre>
+    </div>
+  );
+}
+
 export default function CompileModal({ onClose, onComplete }: CompileModalProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [files, setFiles] = useState<UncompiledFile[]>([]);
@@ -299,7 +318,11 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                 const isCurrentFile = phase === "compiling" && progress.currentFile === f.fileName && !result;
                 const isExpanded = expandedFiles.has(f.path);
                 const pageCount = result ? result.createdSlugs.length + result.updatedSlugs.length : 0;
-                const logs = result?.logs ?? progress.activeLogsByFile[f.path] ?? [];
+                const logs = (result?.logs ?? progress.activeLogsByFile[f.path] ?? []).filter(
+                  (entry) => entry.scope !== "llm_stream"
+                );
+                const streamText = progress.streamTextByFile[f.path] || "";
+                const hasStreamText = streamText.trim().length > 0;
 
                 return (
                   <div
@@ -367,9 +390,16 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                       )}
                     </button>
 
+                    {isExpanded && hasStreamText && (
+                      <StreamTextPanel
+                        content={streamText}
+                        isLive={isCurrentFile}
+                      />
+                    )}
+
                     {/* Expanded log entries */}
                     {isExpanded && logs.length > 0 && (
-                      <div className="px-3 pb-2 pt-1 border-t border-white/5 space-y-0">
+                      <div className={`${hasStreamText ? "px-3 pb-2 pt-1" : "px-3 pb-2 pt-1 border-t border-white/5"} space-y-0`}>
                         {logs.map((entry, i) => (
                           <LogEntryRow key={i} entry={entry} />
                         ))}
@@ -377,7 +407,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                     )}
 
                     {/* Expanded but no logs yet (currently processing) */}
-                    {isExpanded && logs.length === 0 && isCurrentFile && (
+                    {isExpanded && logs.length === 0 && !hasStreamText && isCurrentFile && (
                       <div className="px-3 pb-2 pt-1 border-t border-white/5">
                         <div className="flex items-center gap-1.5 text-[10px] text-white/20">
                           <Loader2 className="w-3 h-3 animate-spin" />

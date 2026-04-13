@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { LLMConfig } from "./client";
 import { resolveLLMRequestPolicy } from "./client";
+import { DEFAULT_OLLAMA_MODEL } from "./defaults";
 
 const KEYS = [
   "LLM_REQUEST_TIMEOUT_MS",
@@ -17,7 +18,7 @@ function clearPolicyEnv() {
 
 function cfg(provider: LLMConfig["provider"]): LLMConfig {
   return provider === "ollama"
-    ? { provider, model: "gemma4:e4b", ollamaUrl: "http://localhost:11434" }
+    ? { provider, model: DEFAULT_OLLAMA_MODEL, ollamaUrl: "http://localhost:11434" }
     : { provider, model: "openrouter/free" };
 }
 

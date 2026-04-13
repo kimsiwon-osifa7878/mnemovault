@@ -42,6 +42,7 @@ export async function runCompile(
     currentFile: "",
     results: [],
     activeLogsByFile: {},
+    streamTextByFile: {},
     status: "running",
     startedAt,
     sessionLogPath: sessionPaths.jsonlPath,
@@ -54,6 +55,7 @@ export async function runCompile(
       activeLogsByFile: Object.fromEntries(
         Object.entries(progress.activeLogsByFile).map(([path, logs]) => [path, [...logs]])
       ),
+      streamTextByFile: { ...progress.streamTextByFile },
     });
   };
 
@@ -85,6 +87,7 @@ export async function runCompile(
   for (const file of files) {
     progress.currentFile = file.fileName;
     progress.activeLogsByFile[file.path] = [];
+    progress.streamTextByFile[file.path] = progress.streamTextByFile[file.path] || "";
     await appendCompileSessionEvent(root, sessionPaths.jsonlPath, {
       kind: "file_start",
       timestamp: new Date().toISOString(),
@@ -105,6 +108,10 @@ export async function runCompile(
           sessionPaths.jsonlPath,
           buildLogEntryEvent(entry)
         );
+        emitProgress();
+      },
+      emitStreamChunk: async (filePath: string, chunk: string) => {
+        progress.streamTextByFile[filePath] = `${progress.streamTextByFile[filePath] || ""}${chunk}`;
         emitProgress();
       },
     });

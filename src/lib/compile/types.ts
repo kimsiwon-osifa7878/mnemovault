@@ -33,6 +33,7 @@ export interface CompileProgress {
   currentFile: string;
   results: CompileFileResult[];
   activeLogsByFile: Record<string, CompileLogEntry[]>;
+  streamTextByFile: Record<string, string>;
   status: "idle" | "running" | "done" | "error";
   startedAt: number;
   sessionLogPath?: string;

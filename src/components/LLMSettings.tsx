@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useLLMStore } from "@/stores/llm-store";
+import { DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "@/lib/llm/defaults";
 import { X, Settings, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 
 interface LLMSettingsProps {
@@ -327,7 +328,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   type="text"
                   value={tempUrl}
                   onChange={(e) => setTempUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
+                  placeholder={DEFAULT_OLLAMA_URL}
                   className="flex-1 bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
                   onKeyDown={(e) => e.key === "Enter" && handleUrlApply()}
                 />
@@ -376,7 +377,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   type="text"
                   value={ollamaModel}
                   onChange={(e) => setOllamaModel(e.target.value)}
-                  placeholder="gemma4:e4b"
+                  placeholder={DEFAULT_OLLAMA_MODEL}
                   className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
                 />
               )}

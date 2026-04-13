@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "@/lib/llm/defaults";
 
 export interface LLMSettings {
   provider: "openrouter" | "ollama";
@@ -25,8 +26,8 @@ export const useLLMStore = create<LLMState>()(
     (set, get) => ({
       provider: "openrouter",
       openrouterModel: "openrouter/free",
-      ollamaModel: process.env.NEXT_PUBLIC_OLLAMA_MODEL || "gemma4:e4b",
-      ollamaUrl: "http://localhost:11434",
+      ollamaModel: DEFAULT_OLLAMA_MODEL,
+      ollamaUrl: DEFAULT_OLLAMA_URL,
       language: "en",
 
       setProvider: (provider) => set({ provider }),
@@ -53,6 +54,18 @@ export const useLLMStore = create<LLMState>()(
     {
       name: "mnemovault-llm-settings",
       version: 2,
+      merge: (persistedState, currentState) => {
+        const merged = {
+          ...currentState,
+          ...(persistedState as Partial<LLMState>),
+        };
+
+        // Always prefer .env-backed defaults for Ollama endpoint/model.
+        merged.ollamaModel = DEFAULT_OLLAMA_MODEL;
+        merged.ollamaUrl = DEFAULT_OLLAMA_URL;
+
+        return merged;
+      },
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 0 || !version) {
