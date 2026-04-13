@@ -274,6 +274,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
               charCount?: number;
               firstChunkElapsedMs?: number | null;
               preview?: string;
+              message?: string;
             };
             const charCount = payload.charCount ?? 0;
             const elapsedMs = payload.elapsedMs ?? Date.now() - startedAt;
@@ -292,7 +293,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
               charsPerSecond: charCount / elapsedSeconds,
               tokensPerSecond: estimatedTokenCount / elapsedSeconds,
               preview: payload.preview || current.preview,
-              message: "Stream benchmark complete",
+              message: payload.message || "Stream benchmark complete",
             }));
             continue;
           }

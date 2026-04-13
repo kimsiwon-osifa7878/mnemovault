@@ -138,6 +138,7 @@ function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
         let charCount = 0;
         let firstChunkElapsedMs: number | null = null;
         let preview = "";
+        let emittedAnyChunk = false;
 
         const write = (event: string, data: unknown) => {
           controller.enqueue(encoder.encode(toSse(event, data)));
@@ -165,6 +166,7 @@ function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
             chunkCount += 1;
             charCount += text.length;
             preview = `${preview}${text}`.slice(-1200);
+            emittedAnyChunk = true;
 
             const elapsedMs = Date.now() - startedAt;
             if (firstChunkElapsedMs === null) {
@@ -186,6 +188,9 @@ function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
             charCount,
             firstChunkElapsedMs,
             preview,
+            message: emittedAnyChunk
+              ? "Stream benchmark complete"
+              : "Benchmark completed but no stream text was emitted",
           });
         } catch (error) {
           const normalized = normalizeLLMError(error);

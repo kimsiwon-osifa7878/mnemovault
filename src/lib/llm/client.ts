@@ -17,6 +17,19 @@ export interface LLMStreamChunk {
   text: string;
 }
 
+type OpenRouterStreamPayload = {
+  choices?: Array<{
+    delta?: {
+      content?: string | Array<{ type?: string; text?: string }>;
+      reasoning?: string;
+    };
+    text?: string;
+    message?: {
+      content?: string | Array<{ type?: string; text?: string }>;
+    };
+  }>;
+};
+
 const DEFAULT_CONFIG: LLMConfig = {
   provider: "openrouter",
   model: "openrouter/free",
@@ -305,10 +318,8 @@ async function* callOpenRouterStream(
     }
 
     try {
-      const payload = JSON.parse(dataLine) as {
-        choices?: { delta?: { content?: string } }[];
-      };
-      const text = payload.choices?.[0]?.delta?.content;
+      const payload = JSON.parse(dataLine) as OpenRouterStreamPayload;
+      const text = extractOpenRouterStreamText(payload);
       if (typeof text === "string" && text.length > 0) {
         yield { text };
       }
@@ -316,6 +327,37 @@ async function* callOpenRouterStream(
       continue;
     }
   }
+}
+
+function normalizeOpenRouterContent(
+  value: string | Array<{ type?: string; text?: string }> | undefined
+): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("");
+}
+
+function extractOpenRouterStreamText(payload: OpenRouterStreamPayload): string {
+  const choice = payload.choices?.[0];
+  if (!choice) {
+    return "";
+  }
+
+  return (
+    normalizeOpenRouterContent(choice.delta?.content) ||
+    choice.delta?.reasoning ||
+    choice.text ||
+    normalizeOpenRouterContent(choice.message?.content) ||
+    ""
+  );
 }
 
 async function callOllama(
