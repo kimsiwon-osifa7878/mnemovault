@@ -1,5 +1,11 @@
-import { listAllFiles, readJsonFile } from "@/lib/storage/client-fs";
+import { listAllFiles, readFileAsBuffer, readJsonFile } from "@/lib/storage/client-fs";
+import { sha256BrowserBuffer } from "@/lib/utils/hash";
 import type { UncompiledFile } from "./types";
+import {
+  COMPILE_PIPELINE_VERSION,
+  getCompileReason,
+  normalizeProcessedFilesRecord,
+} from "./processed-files";
 
 function extractFileType(path: string): string {
   // "raw/articles/foo.txt" → "article" (strip trailing 's')
@@ -20,7 +26,8 @@ export async function getUncompiledFiles(
   root: FileSystemDirectoryHandle
 ): Promise<UncompiledFile[]> {
   const allRawFiles = await listAllFiles(root, "raw");
-  const processed = await readJsonFile(root, "meta/processed_files.json");
+  const processedRaw = await readJsonFile(root, "meta/processed_files.json");
+  const processed = normalizeProcessedFilesRecord(processedRaw);
 
   const uncompiled: UncompiledFile[] = [];
 
@@ -28,12 +35,20 @@ export async function getUncompiledFiles(
     // Skip assets folder
     if (filePath.includes("raw/assets/")) continue;
 
-    if (!processed[filePath]) {
+    const hash = await sha256BrowserBuffer(await readFileAsBuffer(root, filePath));
+    const reason = getCompileReason(
+      filePath,
+      hash,
+      processed,
+      COMPILE_PIPELINE_VERSION
+    );
+
+    if (reason) {
       uncompiled.push({
         path: filePath,
         fileName: extractFileName(filePath),
         fileType: extractFileType(filePath),
-        reason: "new",
+        reason,
       });
     }
   }

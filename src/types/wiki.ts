@@ -11,6 +11,9 @@ export interface Frontmatter {
 export interface WikiPage {
   slug: string;
   filename: string;
+  path: string;
+  editable: boolean;
+  sourceKind: "wiki" | "meta";
   frontmatter: Frontmatter;
   content: string;
   rawContent: string;

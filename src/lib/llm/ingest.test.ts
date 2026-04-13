@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { extractJsonPayload, processIngestWithLLM } from "./ingest";
+import {
+  extractJsonPayload,
+  processIngestWithLLM,
+  processIngestWithLLMStream,
+} from "./ingest";
 
 vi.mock("./prompt-store", () => ({
   getPrompt: vi.fn(async (scope: string, role: string) => `${scope}-${role}`),
@@ -8,9 +12,10 @@ vi.mock("./prompt-store", () => ({
 
 vi.mock("./client", () => ({
   callLLM: vi.fn(),
+  callLLMStream: vi.fn(),
 }));
 
-import { callLLM } from "./client";
+import { callLLM, callLLMStream } from "./client";
 
 describe("extractJsonPayload", () => {
   it("extracts payload from fenced json blocks", () => {
@@ -32,11 +37,71 @@ describe("processIngestWithLLM", () => {
 
   it("parses fenced JSON response correctly", async () => {
     vi.mocked(callLLM).mockResolvedValueOnce(
-      '```json\n{"summary":{"title":"T","content":"C","key_takeaways":["k"]},"concepts":[],"entities":[],"tags":[],"updates_to_existing_pages":[],"open_questions":[]}\n```'
+      '```json\n{"summary":{"title":"T","content":"C","key_takeaways":["k"]},"concepts":[],"entities":[],"claims":[{"text":"Claim","page_name":"T","evidence_type":"EXTRACTED","confidence":0.9,"source_ref":"a.md :: intro"},{"text":"Skip me","page_name":"T","evidence_type":"INVALID","confidence":0.2,"source_ref":"bad"}],"edges":[{"source_page":"T","target_page":"Concept X","relation":"describes","evidence_type":"INFERRED","confidence":0.65,"source_ref":"a.md :: intro"}],"tags":[],"updates_to_existing_pages":[],"open_questions":[]}\n```'
     );
 
     const out = await processIngestWithLLM("a.md", "content", "article");
     expect(out.summary.title).toBe("T");
     expect(out.summary.key_takeaways).toEqual(["k"]);
+    expect(out.claims).toEqual([
+      {
+        text: "Claim",
+        page_name: "T",
+        evidence_type: "EXTRACTED",
+        confidence: 0.9,
+        source_ref: "a.md :: intro",
+      },
+    ]);
+    expect(out.edges).toEqual([
+      {
+        source_page: "T",
+        target_page: "Concept X",
+        relation: "describes",
+        evidence_type: "INFERRED",
+        confidence: 0.65,
+        source_ref: "a.md :: intro",
+      },
+    ]);
+  });
+});
+
+describe("processIngestWithLLMStream", () => {
+  it("parses streamed JSON chunks using the same path as compile ingest", async () => {
+    vi.mocked(callLLMStream).mockImplementationOnce(async function* () {
+      yield { text: '{"summary":{"title":"T","content":"C","key_takeaways":["k"]},' };
+      yield {
+        text: '"concepts":[],"entities":[],"tags":[],"updates_to_existing_pages":[],"open_questions":[]}',
+      };
+    });
+
+    const chunks: string[] = [];
+    const out = await processIngestWithLLMStream(
+      "a.md",
+      "content",
+      "article",
+      undefined,
+      "No existing wiki pages yet.",
+      "en",
+      (chunk) => {
+        chunks.push(chunk);
+      }
+    );
+
+    expect(out.result.summary.title).toBe("T");
+    expect(out.chunkCount).toBe(2);
+    expect(chunks).toHaveLength(2);
+    expect(out.rawResponse).toContain('"summary"');
+  });
+
+  it("throws invalid_response when streamed output is not valid JSON", async () => {
+    vi.mocked(callLLMStream).mockImplementationOnce(async function* () {
+      yield { text: "not-json" };
+    });
+
+    await expect(
+      processIngestWithLLMStream("a.md", "content", "article")
+    ).rejects.toMatchObject({
+      code: "invalid_response",
+    });
   });
 });

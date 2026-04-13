@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "@/lib/llm/defaults";
 
 export interface LLMSettings {
   provider: "openrouter" | "ollama";
@@ -9,6 +10,7 @@ export interface LLMSettings {
   ollamaModel: string;
   ollamaUrl: string;
   language: "en" | "ko";
+  compileLogsEnabled: boolean;
 }
 
 interface LLMState extends LLMSettings {
@@ -17,6 +19,7 @@ interface LLMState extends LLMSettings {
   setOllamaModel: (model: string) => void;
   setOllamaUrl: (url: string) => void;
   setLanguage: (language: "en" | "ko") => void;
+  setCompileLogsEnabled: (enabled: boolean) => void;
   getConfig: () => { provider: "openrouter" | "ollama"; model: string; ollamaUrl?: string };
 }
 
@@ -25,15 +28,17 @@ export const useLLMStore = create<LLMState>()(
     (set, get) => ({
       provider: "openrouter",
       openrouterModel: "openrouter/free",
-      ollamaModel: "gemma4:e4b",
-      ollamaUrl: "http://localhost:11434",
+      ollamaModel: DEFAULT_OLLAMA_MODEL,
+      ollamaUrl: DEFAULT_OLLAMA_URL,
       language: "en",
+      compileLogsEnabled: true,
 
       setProvider: (provider) => set({ provider }),
       setOpenRouterModel: (openrouterModel) => set({ openrouterModel }),
       setOllamaModel: (ollamaModel) => set({ ollamaModel }),
       setOllamaUrl: (ollamaUrl) => set({ ollamaUrl }),
       setLanguage: (language) => set({ language }),
+      setCompileLogsEnabled: (compileLogsEnabled) => set({ compileLogsEnabled }),
 
       getConfig: () => {
         const state = get();
@@ -52,7 +57,19 @@ export const useLLMStore = create<LLMState>()(
     }),
     {
       name: "mnemovault-llm-settings",
-      version: 2,
+      version: 3,
+      merge: (persistedState, currentState) => {
+        const merged = {
+          ...currentState,
+          ...(persistedState as Partial<LLMState>),
+        };
+
+        // Always prefer .env-backed defaults for Ollama endpoint/model.
+        merged.ollamaModel = DEFAULT_OLLAMA_MODEL;
+        merged.ollamaUrl = DEFAULT_OLLAMA_URL;
+
+        return merged;
+      },
       migrate: (persisted: unknown, version: number) => {
         const state = persisted as Record<string, unknown>;
         if (version === 0 || !version) {
@@ -64,6 +81,11 @@ export const useLLMStore = create<LLMState>()(
         }
         if (version < 2) {
           if (!state.language) state.language = "en";
+        }
+        if (version < 3) {
+          if (typeof state.compileLogsEnabled !== "boolean") {
+            state.compileLogsEnabled = true;
+          }
         }
         return state as unknown as LLMState;
       },

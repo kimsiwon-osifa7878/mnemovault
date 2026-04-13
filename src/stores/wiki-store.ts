@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { WikiPage } from "@/types/wiki";
-import { parseWikiPage } from "@/lib/wiki/parser";
+import { createRawWorkspacePage, parseWikiPage } from "@/lib/wiki/parser";
 import * as clientFs from "@/lib/storage/client-fs";
 import { useStorageStore } from "./storage-store";
 
@@ -17,6 +17,7 @@ interface WikiState {
   setError: (error: string | null) => void;
   fetchPages: () => Promise<void>;
   fetchPage: (slug: string) => Promise<void>;
+  openFile: (filePath: string) => Promise<void>;
   savePage: (slug: string, content: string) => Promise<void>;
   deletePage: (slug: string) => Promise<void>;
 }
@@ -74,8 +75,23 @@ export const useWikiStore = create<WikiState>((set, get) => ({
       const raw = await clientFs.readFile(root, match);
       const filename = match.split("/").pop() || match;
       const page = parseWikiPage(filename, raw);
+      page.path = match;
 
       set({ currentPage: page, currentSlug: slug, isLoading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, isLoading: false });
+    }
+  },
+
+  openFile: async (filePath: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const root = useStorageStore.getState().contentHandle;
+      if (!root) throw new Error("Storage not connected");
+
+      const raw = await clientFs.readFile(root, filePath);
+      const page = createRawWorkspacePage(filePath, raw);
+      set({ currentPage: page, currentSlug: page.slug, isLoading: false });
     } catch (e) {
       set({ error: (e as Error).message, isLoading: false });
     }
@@ -86,6 +102,11 @@ export const useWikiStore = create<WikiState>((set, get) => ({
     try {
       const root = useStorageStore.getState().contentHandle;
       if (!root) throw new Error("Storage not connected");
+
+      const currentPage = get().currentPage;
+      if (!currentPage?.editable) {
+        throw new Error("This file is read-only");
+      }
 
       // Find the existing file path
       const files = await clientFs.listFiles(root, "wiki");
@@ -114,6 +135,11 @@ export const useWikiStore = create<WikiState>((set, get) => ({
     try {
       const root = useStorageStore.getState().contentHandle;
       if (!root) throw new Error("Storage not connected");
+
+      const currentPage = get().currentPage;
+      if (!currentPage?.editable) {
+        throw new Error("This file cannot be deleted here");
+      }
 
       const files = await clientFs.listFiles(root, "wiki");
       const match = files.find((f) => {

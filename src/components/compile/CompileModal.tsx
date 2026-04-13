@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useStorageStore } from "@/stores/storage-store";
 import { useLLMStore } from "@/stores/llm-store";
+import { useWikiStore } from "@/stores/wiki-store";
 import { getUncompiledFiles } from "@/lib/compile/get-uncompiled";
 import { runCompile } from "@/lib/compile/run-compile";
 import type { UncompiledFile, CompileProgress, CompileLogEntry } from "@/lib/compile/types";
@@ -21,6 +22,7 @@ import {
   AlertCircle,
   Info,
   PenLine,
+  ExternalLink,
 } from "lucide-react";
 
 interface CompileModalProps {
@@ -29,6 +31,17 @@ interface CompileModalProps {
 }
 
 type Phase = "loading" | "ready" | "compiling" | "done";
+
+function formatCompileReason(reason: UncompiledFile["reason"]): string {
+  switch (reason) {
+    case "new":
+      return "new";
+    case "content_changed":
+      return "content changed";
+    case "pipeline_changed":
+      return "pipeline changed";
+  }
+}
 
 function formatElapsed(ms: number): string {
   const secs = Math.floor(ms / 1000);
@@ -89,6 +102,25 @@ function LogEntryRow({ entry }: { entry: CompileLogEntry }) {
   );
 }
 
+function StreamTextPanel({
+  content,
+  isLive,
+}: {
+  content: string;
+  isLive: boolean;
+}) {
+  return (
+    <div className="px-3 pt-2 pb-2 border-t border-white/5">
+      <div className="text-[10px] uppercase tracking-wider text-white/35 mb-2">
+        {isLive ? "LLM Response (live)" : "LLM Response (partial)"}
+      </div>
+      <pre className="rounded bg-black/40 border border-white/5 px-3 py-2 text-[11px] text-white/70 whitespace-pre-wrap break-words overflow-x-auto max-h-64">
+        {content}
+      </pre>
+    </div>
+  );
+}
+
 export default function CompileModal({ onClose, onComplete }: CompileModalProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [files, setFiles] = useState<UncompiledFile[]>([]);
@@ -101,6 +133,8 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
   const contentHandle = useStorageStore((s) => s.contentHandle);
   const getConfig = useLLMStore((s) => s.getConfig);
   const language = useLLMStore((s) => s.language);
+  const compileLogsEnabled = useLLMStore((s) => s.compileLogsEnabled);
+  const openFile = useWikiStore((s) => s.openFile);
 
   useEffect(() => {
     if (!contentHandle) return;
@@ -136,6 +170,15 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
     }
   }, [progress?.currentFile, phase, files]);
 
+  useEffect(() => {
+    if (!listRef.current || phase !== "compiling") return;
+    const node = listRef.current;
+    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+    if (nearBottom) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [phase, progress]);
+
   const handleStartCompile = async () => {
     if (!contentHandle || files.length === 0) return;
 
@@ -149,11 +192,19 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
         if (timerRef.current) clearInterval(timerRef.current);
         onComplete();
       }
-    }, language);
+    }, language, {
+      logEnabled: compileLogsEnabled,
+    });
   };
 
   const handleClose = () => {
     if (phase === "compiling") return;
+    onClose();
+  };
+
+  const handleOpenLogs = async () => {
+    if (!progress?.sessionLogPath) return;
+    await openFile(progress.sessionLogPath);
     onClose();
   };
 
@@ -228,7 +279,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                       <FileText className="w-3.5 h-3.5 text-amber-400/60 shrink-0" />
                       <span className="text-sm text-white/70 truncate flex-1">{f.fileName}</span>
                       <span className="text-[10px] text-white/30 uppercase shrink-0">{f.fileType}</span>
-                      <span className="text-[10px] text-amber-400/60 shrink-0">{f.reason}</span>
+                      <span className="text-[10px] text-amber-400/60 shrink-0">{formatCompileReason(f.reason)}</span>
                     </div>
                   ))}
                 </div>
@@ -270,7 +321,13 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                 const isCurrentFile = phase === "compiling" && progress.currentFile === f.fileName && !result;
                 const isExpanded = expandedFiles.has(f.path);
                 const pageCount = result ? result.createdSlugs.length + result.updatedSlugs.length : 0;
-                const logs = result?.logs ?? [];
+                const logs = (result?.logs ?? progress.activeLogsByFile[f.path] ?? []).filter(
+                  (entry) => entry.scope !== "llm_stream"
+                );
+                const streamText = progress.streamTextByFile[f.path] || "";
+                const hasStreamText = streamText.trim().length > 0;
+                const shouldShowLogs = compileLogsEnabled && logs.length > 0;
+                const shouldAllowExpand = !!(result || isCurrentFile);
 
                 return (
                   <div
@@ -287,13 +344,13 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                   >
                     {/* File header row — clickable to toggle logs */}
                     <button
-                      onClick={() => (result || isCurrentFile) && toggleFile(f.path)}
+                      onClick={() => shouldAllowExpand && toggleFile(f.path)}
                       className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left ${
-                        result || isCurrentFile ? "cursor-pointer" : "cursor-default"
+                        shouldAllowExpand ? "cursor-pointer" : "cursor-default"
                       }`}
                     >
                       {/* Expand/collapse chevron */}
-                      {result || isCurrentFile ? (
+                      {shouldAllowExpand ? (
                         isExpanded
                           ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0" />
                           : <ChevronRight className="w-3 h-3 text-white/20 shrink-0" />
@@ -333,14 +390,21 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                           {result.error.length > 60 ? result.error.slice(0, 60) + "..." : result.error}
                         </span>
                       )}
-                      {logs.length > 0 && (
+                      {shouldShowLogs && (
                         <span className="text-[10px] text-white/20 shrink-0">{logs.length} logs</span>
                       )}
                     </button>
 
+                    {isExpanded && hasStreamText && (
+                      <StreamTextPanel
+                        content={streamText}
+                        isLive={isCurrentFile}
+                      />
+                    )}
+
                     {/* Expanded log entries */}
-                    {isExpanded && logs.length > 0 && (
-                      <div className="px-3 pb-2 pt-1 border-t border-white/5 space-y-0">
+                    {isExpanded && shouldShowLogs && (
+                      <div className={`${hasStreamText ? "px-3 pb-2 pt-1" : "px-3 pb-2 pt-1 border-t border-white/5"} space-y-0`}>
                         {logs.map((entry, i) => (
                           <LogEntryRow key={i} entry={entry} />
                         ))}
@@ -348,11 +412,11 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                     )}
 
                     {/* Expanded but no logs yet (currently processing) */}
-                    {isExpanded && logs.length === 0 && isCurrentFile && (
+                    {isExpanded && !hasStreamText && isCurrentFile && (
                       <div className="px-3 pb-2 pt-1 border-t border-white/5">
                         <div className="flex items-center gap-1.5 text-[10px] text-white/20">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          Waiting for logs...
+                          {compileLogsEnabled ? "Waiting for logs..." : "Waiting for response..."}
                         </div>
                       </div>
                     )}
@@ -374,10 +438,34 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                   {failCount > 0 && (
                     <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/20">
                       <div className="text-red-400 font-medium">{failCount} failed</div>
-                      <div className="text-red-400/50 mt-0.5">Click to see logs</div>
+                      {compileLogsEnabled && progress.sessionLogPath && (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenLogs()}
+                          className="text-red-400/70 hover:text-red-300 mt-0.5 inline-flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Click to see logs</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
+                {compileLogsEnabled && progress.sessionLogPath && (
+                  <div className="px-3 py-2 rounded bg-white/[0.03] border border-white/5 text-[11px] text-white/45">
+                    Session log: <span className="font-mono">{progress.sessionLogPath}</span>
+                  </div>
+                )}
+                {compileLogsEnabled && progress.sessionLogPath && (
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenLogs()}
+                    className="w-full px-4 py-2 rounded text-sm bg-white/5 text-white/70 hover:bg-white/10 inline-flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open Session Logs
+                  </button>
+                )}
                 <button
                   onClick={onClose}
                   className="w-full px-4 py-2 rounded text-sm bg-white/5 text-white/60 hover:bg-white/10"

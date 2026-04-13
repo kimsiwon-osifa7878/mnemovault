@@ -83,6 +83,11 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
               {currentPage.frontmatter.type}
             </span>
           )}
+          {currentPage.sourceKind === "meta" && (
+            <span className="px-1.5 py-0.5 text-[10px] rounded bg-white/10 text-white/40">
+              {currentPage.path}
+            </span>
+          )}
           {hasChanges && (
             <span className="w-2 h-2 rounded-full bg-orange-400" title="Unsaved changes" />
           )}
@@ -118,7 +123,7 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
           <div className="w-px h-4 bg-white/10 mx-1" />
           <button
             onClick={handleSave}
-            disabled={!hasChanges || isLoading}
+            disabled={!currentPage.editable || !hasChanges || isLoading}
             className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
             title="Save (Ctrl+S)"
           >
@@ -126,7 +131,8 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
           </button>
           <button
             onClick={handleDelete}
-            className="p-1.5 rounded text-red-400 hover:bg-red-500/10"
+            disabled={!currentPage.editable}
+            className="p-1.5 rounded text-red-400 hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed"
             title="Delete"
           >
             <Trash2 className="w-4 h-4" />
