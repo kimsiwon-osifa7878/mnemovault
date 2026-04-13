@@ -10,6 +10,7 @@ export interface LLMSettings {
   ollamaModel: string;
   ollamaUrl: string;
   language: "en" | "ko";
+  compileLogsEnabled: boolean;
 }
 
 interface LLMState extends LLMSettings {
@@ -18,6 +19,7 @@ interface LLMState extends LLMSettings {
   setOllamaModel: (model: string) => void;
   setOllamaUrl: (url: string) => void;
   setLanguage: (language: "en" | "ko") => void;
+  setCompileLogsEnabled: (enabled: boolean) => void;
   getConfig: () => { provider: "openrouter" | "ollama"; model: string; ollamaUrl?: string };
 }
 
@@ -29,12 +31,14 @@ export const useLLMStore = create<LLMState>()(
       ollamaModel: DEFAULT_OLLAMA_MODEL,
       ollamaUrl: DEFAULT_OLLAMA_URL,
       language: "en",
+      compileLogsEnabled: true,
 
       setProvider: (provider) => set({ provider }),
       setOpenRouterModel: (openrouterModel) => set({ openrouterModel }),
       setOllamaModel: (ollamaModel) => set({ ollamaModel }),
       setOllamaUrl: (ollamaUrl) => set({ ollamaUrl }),
       setLanguage: (language) => set({ language }),
+      setCompileLogsEnabled: (compileLogsEnabled) => set({ compileLogsEnabled }),
 
       getConfig: () => {
         const state = get();
@@ -53,7 +57,7 @@ export const useLLMStore = create<LLMState>()(
     }),
     {
       name: "mnemovault-llm-settings",
-      version: 2,
+      version: 3,
       merge: (persistedState, currentState) => {
         const merged = {
           ...currentState,
@@ -77,6 +81,11 @@ export const useLLMStore = create<LLMState>()(
         }
         if (version < 2) {
           if (!state.language) state.language = "en";
+        }
+        if (version < 3) {
+          if (typeof state.compileLogsEnabled !== "boolean") {
+            state.compileLogsEnabled = true;
+          }
         }
         return state as unknown as LLMState;
       },

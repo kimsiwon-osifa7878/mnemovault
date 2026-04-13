@@ -26,6 +26,8 @@ const today = () => new Date().toISOString().split("T")[0];
 const WIKI_CONTEXT_PAGE_LIMIT = 24;
 const WIKI_CONTEXT_SNIPPET_LIMIT = 360;
 const EVIDENCE_BLOCK_TAG = "mnemovault-evidence";
+const STREAM_LOG_FLUSH_INTERVAL_MS = 250;
+const STREAM_LOG_FLUSH_CHAR_THRESHOLD = 120;
 
 interface PageEvidence {
   claims: ClaimResult[];
@@ -401,7 +403,8 @@ export async function compileFile(
   llmConfig: LLMConfig,
   existingSlugs: Set<string>,
   language: "en" | "ko" = "en",
-  hooks?: CompileFileHooks
+  hooks?: CompileFileHooks,
+  options?: { logEnabled?: boolean }
 ): Promise<CompileFileResult> {
   const logs: CompileLogEntry[] = [];
   const result: CompileFileResult = {
@@ -411,7 +414,10 @@ export async function compileFile(
     updatedSlugs: [],
     logs,
   };
-  const log = createLogger(logs, file.path, hooks);
+  const logEnabled = options?.logEnabled ?? true;
+  const log = logEnabled
+    ? createLogger(logs, file.path, hooks)
+    : async () => undefined;
 
   try {
     // 1. Read raw file
@@ -500,6 +506,32 @@ export async function compileFile(
     let llmResult: IngestLLMResult | null = null;
     let streamError: string | null = null;
     let debugSaved = false;
+    let pendingStreamLog = "";
+    let lastStreamLogAt = Date.now();
+
+    const flushStreamLog = async (force: boolean = false) => {
+      if (!pendingStreamLog) return;
+
+      const elapsed = Date.now() - lastStreamLogAt;
+      if (
+        !force &&
+        pendingStreamLog.length < STREAM_LOG_FLUSH_CHAR_THRESHOLD &&
+        elapsed < STREAM_LOG_FLUSH_INTERVAL_MS
+      ) {
+        return;
+      }
+
+      const text = pendingStreamLog;
+      pendingStreamLog = "";
+      lastStreamLogAt = Date.now();
+      await log(
+        "response",
+        "llm_stream",
+        "LLM chunk",
+        text,
+        "stream_chunk"
+      );
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -530,6 +562,9 @@ export async function compileFile(
         }
 
         if (message.event === "debug_payload") {
+          if (!logEnabled) {
+            continue;
+          }
           try {
             const payload = JSON.parse(message.data) as Record<string, unknown>;
             await writeFile(root, debugPath, JSON.stringify(payload, null, 2));
@@ -559,13 +594,8 @@ export async function compileFile(
             const text = payload.text || "";
             rawResponse += text;
             await hooks?.emitStreamChunk?.(file.path, text);
-            await log(
-              "response",
-              "llm_stream",
-              "LLM chunk",
-              text,
-              "stream_chunk"
-            );
+            pendingStreamLog += text;
+            await flushStreamLog();
           } catch {
             continue;
           }
@@ -584,6 +614,8 @@ export async function compileFile(
         }
       }
     }
+
+    await flushStreamLog(true);
 
     if (buffer.trim()) {
       const finalMessage = parseSseBlock(buffer.trim());
@@ -608,7 +640,7 @@ export async function compileFile(
       openQuestionCount: llmResult.open_questions?.length ?? 0,
       tagCount: llmResult.tags?.length ?? 0,
     }, null, 2), "response_ready");
-    if (!debugSaved) {
+    if (logEnabled && !debugSaved) {
       await log(
         "info",
         "file",

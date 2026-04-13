@@ -133,6 +133,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
   const contentHandle = useStorageStore((s) => s.contentHandle);
   const getConfig = useLLMStore((s) => s.getConfig);
   const language = useLLMStore((s) => s.language);
+  const compileLogsEnabled = useLLMStore((s) => s.compileLogsEnabled);
   const openFile = useWikiStore((s) => s.openFile);
 
   useEffect(() => {
@@ -191,7 +192,9 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
         if (timerRef.current) clearInterval(timerRef.current);
         onComplete();
       }
-    }, language);
+    }, language, {
+      logEnabled: compileLogsEnabled,
+    });
   };
 
   const handleClose = () => {
@@ -323,6 +326,8 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                 );
                 const streamText = progress.streamTextByFile[f.path] || "";
                 const hasStreamText = streamText.trim().length > 0;
+                const shouldShowLogs = compileLogsEnabled && logs.length > 0;
+                const shouldAllowExpand = !!(result || isCurrentFile);
 
                 return (
                   <div
@@ -339,13 +344,13 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                   >
                     {/* File header row — clickable to toggle logs */}
                     <button
-                      onClick={() => (result || isCurrentFile) && toggleFile(f.path)}
+                      onClick={() => shouldAllowExpand && toggleFile(f.path)}
                       className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left ${
-                        result || isCurrentFile ? "cursor-pointer" : "cursor-default"
+                        shouldAllowExpand ? "cursor-pointer" : "cursor-default"
                       }`}
                     >
                       {/* Expand/collapse chevron */}
-                      {result || isCurrentFile ? (
+                      {shouldAllowExpand ? (
                         isExpanded
                           ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0" />
                           : <ChevronRight className="w-3 h-3 text-white/20 shrink-0" />
@@ -385,7 +390,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                           {result.error.length > 60 ? result.error.slice(0, 60) + "..." : result.error}
                         </span>
                       )}
-                      {logs.length > 0 && (
+                      {shouldShowLogs && (
                         <span className="text-[10px] text-white/20 shrink-0">{logs.length} logs</span>
                       )}
                     </button>
@@ -398,7 +403,7 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                     )}
 
                     {/* Expanded log entries */}
-                    {isExpanded && logs.length > 0 && (
+                    {isExpanded && shouldShowLogs && (
                       <div className={`${hasStreamText ? "px-3 pb-2 pt-1" : "px-3 pb-2 pt-1 border-t border-white/5"} space-y-0`}>
                         {logs.map((entry, i) => (
                           <LogEntryRow key={i} entry={entry} />
@@ -407,11 +412,11 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                     )}
 
                     {/* Expanded but no logs yet (currently processing) */}
-                    {isExpanded && logs.length === 0 && !hasStreamText && isCurrentFile && (
+                    {isExpanded && !hasStreamText && isCurrentFile && (
                       <div className="px-3 pb-2 pt-1 border-t border-white/5">
                         <div className="flex items-center gap-1.5 text-[10px] text-white/20">
                           <Loader2 className="w-3 h-3 animate-spin" />
-                          Waiting for logs...
+                          {compileLogsEnabled ? "Waiting for logs..." : "Waiting for response..."}
                         </div>
                       </div>
                     )}
@@ -433,23 +438,25 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
                   {failCount > 0 && (
                     <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/20">
                       <div className="text-red-400 font-medium">{failCount} failed</div>
-                      <button
-                        type="button"
-                        onClick={() => void handleOpenLogs()}
-                        className="text-red-400/70 hover:text-red-300 mt-0.5 inline-flex items-center gap-1"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Click to see logs</span>
-                      </button>
+                      {compileLogsEnabled && progress.sessionLogPath && (
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenLogs()}
+                          className="text-red-400/70 hover:text-red-300 mt-0.5 inline-flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Click to see logs</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
-                {progress.sessionLogPath && (
+                {compileLogsEnabled && progress.sessionLogPath && (
                   <div className="px-3 py-2 rounded bg-white/[0.03] border border-white/5 text-[11px] text-white/45">
                     Session log: <span className="font-mono">{progress.sessionLogPath}</span>
                   </div>
                 )}
-                {progress.sessionLogPath && (
+                {compileLogsEnabled && progress.sessionLogPath && (
                   <button
                     type="button"
                     onClick={() => void handleOpenLogs()}

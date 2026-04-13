@@ -66,10 +66,24 @@ export async function appendFile(
   filePath: string,
   content: string
 ): Promise<void> {
-  const existing = (await fileExists(root, filePath))
-    ? await readFile(root, filePath)
-    : "";
-  await writeFile(root, filePath, `${existing}${content}`);
+  const { dirParts, fileName } = splitPath(filePath);
+  const dir = dirParts.length > 0
+    ? await getNestedDirHandle(root, dirParts, true)
+    : root;
+  const fileHandle = await dir.getFileHandle(fileName, { create: true });
+
+  try {
+    const existingFile = await fileHandle.getFile();
+    const writable = await fileHandle.createWritable({ keepExistingData: true });
+    await writable.seek(existingFile.size);
+    await writable.write(content);
+    await writable.close();
+  } catch {
+    const existing = (await fileExists(root, filePath))
+      ? await readFile(root, filePath)
+      : "";
+    await writeFile(root, filePath, `${existing}${content}`);
+  }
 }
 
 export async function deleteFile(

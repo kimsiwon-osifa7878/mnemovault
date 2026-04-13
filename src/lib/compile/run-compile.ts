@@ -32,10 +32,12 @@ export async function runCompile(
   files: UncompiledFile[],
   llmConfig: LLMConfig,
   onProgress: (progress: CompileProgress) => void,
-  language: "en" | "ko" = "en"
+  language: "en" | "ko" = "en",
+  options?: { logEnabled?: boolean }
 ): Promise<CompileFileResult[]> {
   const startedAt = Date.now();
-  const sessionPaths = createCompileSessionPaths(startedAt);
+  const logEnabled = options?.logEnabled ?? true;
+  const sessionPaths = logEnabled ? createCompileSessionPaths(startedAt) : null;
   const progress: CompileProgress = {
     total: files.length,
     completed: 0,
@@ -45,8 +47,10 @@ export async function runCompile(
     streamTextByFile: {},
     status: "running",
     startedAt,
-    sessionLogPath: sessionPaths.jsonlPath,
+    sessionLogPath: sessionPaths?.jsonlPath,
   };
+  let sessionWriteQueue = Promise.resolve();
+  let progressFlushTimer: number | null = null;
 
   const emitProgress = () => {
     onProgress({
@@ -59,14 +63,35 @@ export async function runCompile(
     });
   };
 
-  await appendCompileSessionEvent(root, sessionPaths.jsonlPath, {
-    kind: "session_start",
-    timestamp: new Date(progress.startedAt).toISOString(),
-    payload: {
-      total: files.length,
-      model: `${llmConfig.provider}:${llmConfig.model}`,
-    },
-  });
+  const scheduleEmitProgress = () => {
+    if (progressFlushTimer) return;
+    progressFlushTimer = window.setTimeout(() => {
+      progressFlushTimer = null;
+      emitProgress();
+    }, 50);
+  };
+
+  const queueSessionEvent = (event: Parameters<typeof appendCompileSessionEvent>[2]) => {
+    if (!sessionPaths) {
+      return Promise.resolve();
+    }
+    const write = sessionWriteQueue.then(() =>
+      appendCompileSessionEvent(root, sessionPaths.jsonlPath, event)
+    );
+    sessionWriteQueue = write.catch(() => undefined);
+    return write;
+  };
+
+  if (logEnabled) {
+    await queueSessionEvent({
+      kind: "session_start",
+      timestamp: new Date(progress.startedAt).toISOString(),
+      payload: {
+        total: files.length,
+        model: `${llmConfig.provider}:${llmConfig.model}`,
+      },
+    });
+  }
 
   emitProgress();
 
@@ -88,33 +113,37 @@ export async function runCompile(
     progress.currentFile = file.fileName;
     progress.activeLogsByFile[file.path] = [];
     progress.streamTextByFile[file.path] = progress.streamTextByFile[file.path] || "";
-    await appendCompileSessionEvent(root, sessionPaths.jsonlPath, {
-      kind: "file_start",
-      timestamp: new Date().toISOString(),
-      filePath: file.path,
-      payload: {
-        fileName: file.fileName,
-        fileType: file.fileType,
-        reason: file.reason,
-      },
-    });
+    if (logEnabled) {
+      await queueSessionEvent({
+        kind: "file_start",
+        timestamp: new Date().toISOString(),
+        filePath: file.path,
+        payload: {
+          fileName: file.fileName,
+          fileType: file.fileType,
+          reason: file.reason,
+        },
+      });
+    }
     emitProgress();
 
     const result = await compileFile(root, file, llmConfig, existingSlugs, language, {
       emitLog: async (entry: CompileLogEntry) => {
+        if (!logEnabled) return;
         progress.activeLogsByFile[file.path] = [...(progress.activeLogsByFile[file.path] || []), entry];
-        await appendCompileSessionEvent(
-          root,
-          sessionPaths.jsonlPath,
-          buildLogEntryEvent(entry)
-        );
-        emitProgress();
+        void queueSessionEvent(buildLogEntryEvent(entry));
+        scheduleEmitProgress();
       },
       emitStreamChunk: async (filePath: string, chunk: string) => {
         progress.streamTextByFile[filePath] = `${progress.streamTextByFile[filePath] || ""}${chunk}`;
-        emitProgress();
+        scheduleEmitProgress();
       },
+    }, {
+      logEnabled,
     });
+    if (!logEnabled) {
+      result.logs = [];
+    }
     progress.results.push(result);
 
     // Update processed_files.json immediately per file
@@ -127,16 +156,18 @@ export async function runCompile(
       );
     }
 
-    await appendCompileSessionEvent(root, sessionPaths.jsonlPath, {
-      kind: result.error ? "file_error" : "file_done",
-      timestamp: new Date().toISOString(),
-      filePath: file.path,
-      payload: {
-        error: result.error,
-        createdSlugs: result.createdSlugs,
-        updatedSlugs: result.updatedSlugs,
-      },
-    });
+    if (logEnabled) {
+      await queueSessionEvent({
+        kind: result.error ? "file_error" : "file_done",
+        timestamp: new Date().toISOString(),
+        filePath: file.path,
+        payload: {
+          error: result.error,
+          createdSlugs: result.createdSlugs,
+          updatedSlugs: result.updatedSlugs,
+        },
+      });
+    }
     progress.completed++;
     emitProgress();
   }
@@ -157,45 +188,56 @@ export async function runCompile(
   }
 
   // Append to log.md
-  try {
-    const logContent = await readFile(root, "wiki/log.md");
-    const successResults = progress.results.filter((r) => !r.error);
-    const failedResults = progress.results.filter((r) => r.error);
+  if (logEnabled) {
+    try {
+      const logContent = await readFile(root, "wiki/log.md");
+      const successResults = progress.results.filter((r) => !r.error);
+      const failedResults = progress.results.filter((r) => r.error);
 
-    const details: string[] = [];
-    for (const r of successResults) {
-      if (r.createdSlugs.length > 0) {
-        details.push(`Created: ${r.createdSlugs.map((s) => `[[${s}]]`).join(", ")}`);
+      const details: string[] = [];
+      for (const r of successResults) {
+        if (r.createdSlugs.length > 0) {
+          details.push(`Created: ${r.createdSlugs.map((s) => `[[${s}]]`).join(", ")}`);
+        }
+        if (r.updatedSlugs.length > 0) {
+          details.push(`Updated: ${r.updatedSlugs.map((s) => `[[${s}]]`).join(", ")}`);
+        }
       }
-      if (r.updatedSlugs.length > 0) {
-        details.push(`Updated: ${r.updatedSlugs.map((s) => `[[${s}]]`).join(", ")}`);
+      if (failedResults.length > 0) {
+        details.push(`Failed: ${failedResults.map((r) => r.file.fileName).join(", ")}`);
       }
-    }
-    if (failedResults.length > 0) {
-      details.push(`Failed: ${failedResults.map((r) => r.file.fileName).join(", ")}`);
-    }
-    details.push(`Session log: ${sessionPaths.jsonlPath}`);
-    details.push(`Index updated`);
+      if (sessionPaths?.jsonlPath) {
+        details.push(`Session log: ${sessionPaths.jsonlPath}`);
+      }
+      details.push(`Index updated`);
 
-    const summary = `${files.length} file(s) compiled`;
-    const updatedLog = appendLogEntry(logContent, "compile", summary, details);
-    await writeFile(root, "wiki/log.md", updatedLog);
-  } catch {
-    // Non-fatal
+      const summary = `${files.length} file(s) compiled`;
+      const updatedLog = appendLogEntry(logContent, "compile", summary, details);
+      await writeFile(root, "wiki/log.md", updatedLog);
+    } catch {
+      // Non-fatal
+    }
   }
-  await appendCompileSessionEvent(root, sessionPaths.jsonlPath, {
-    kind: "session_done",
-    timestamp: new Date().toISOString(),
-    payload: {
-      completed: progress.completed,
-      succeeded: progress.results.filter((result) => !result.error).length,
-      failed: progress.results.filter((result) => !!result.error).length,
-      sessionLogPath: sessionPaths.jsonlPath,
-    },
-  });
+  if (logEnabled) {
+    await queueSessionEvent({
+      kind: "session_done",
+      timestamp: new Date().toISOString(),
+      payload: {
+        completed: progress.completed,
+        succeeded: progress.results.filter((result) => !result.error).length,
+        failed: progress.results.filter((result) => !!result.error).length,
+        sessionLogPath: sessionPaths?.jsonlPath,
+      },
+    });
+  }
+  await sessionWriteQueue;
 
   progress.status = "done";
   progress.currentFile = "";
+  if (progressFlushTimer) {
+    clearTimeout(progressFlushTimer);
+    progressFlushTimer = null;
+  }
   emitProgress();
 
   return progress.results;

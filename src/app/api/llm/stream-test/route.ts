@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { LLMRequestError, normalizeLLMError } from "@/lib/llm/errors";
+import { callLLMStream, type LLMConfig } from "@/lib/llm/client";
+import { normalizeLLMError } from "@/lib/llm/errors";
 
 function classifyFailure(error: ReturnType<typeof normalizeLLMError>) {
   const details = {
@@ -59,90 +60,166 @@ function classifyFailure(error: ReturnType<typeof normalizeLLMError>) {
   };
 }
 
-async function readFirstSseChunk(response: Response): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const blocks = buffer.split(/\r?\n\r?\n/);
-    buffer = blocks.pop() || "";
-
-    for (const block of blocks) {
-      const lines = block.split(/\r?\n/);
-      const dataLines = lines
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart());
-      if (dataLines.length === 0) continue;
-      const data = dataLines.join("\n");
-      if (data === "[DONE]") continue;
-      try {
-        const payload = JSON.parse(data) as {
-          choices?: { delta?: { content?: string } }[];
-        };
-        const text = payload.choices?.[0]?.delta?.content;
-        if (typeof text === "string" && text.length > 0) {
-          return text;
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-
-  return "";
+function toSse(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-async function readFirstNdjsonChunk(response: Response): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+function createConfig(body: Record<string, unknown>): LLMConfig | null {
+  const provider = body.provider === "ollama" ? "ollama" : "openrouter";
+  const model = typeof body.model === "string" ? body.model : "";
+  const ollamaUrl =
+    typeof body.ollamaUrl === "string" ? body.ollamaUrl : undefined;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  if (!model) {
+    return null;
+  }
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() || "";
+  return provider === "ollama"
+    ? { provider, model, ollamaUrl }
+    : { provider, model };
+}
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const payload = JSON.parse(trimmed) as {
-          message?: { content?: string };
-        };
-        const text = payload.message?.content;
-        if (typeof text === "string" && text.length > 0) {
-          return text;
-        }
-      } catch {
-        continue;
-      }
+function createPrompt(prompt: string): { systemPrompt: string; userPrompt: string } {
+  return {
+    systemPrompt:
+      "You are running a streaming latency benchmark. Respond plainly and do not use markdown fences.",
+    userPrompt:
+      prompt.trim() ||
+      "Write 12 short numbered lines about streaming performance, each line 10 to 20 words.",
+  };
+}
+
+async function runProbe(config: LLMConfig) {
+  const startedAt = Date.now();
+  let firstChunk = "";
+
+  for await (const chunk of callLLMStream(
+    "You are a concise assistant.",
+    "Reply with a short greeting.",
+    32,
+    config,
+    { temperature: 0 }
+  )) {
+    if (chunk.text) {
+      firstChunk = chunk.text;
+      break;
     }
   }
 
-  return "";
+  if (!firstChunk) {
+    return NextResponse.json({
+      status: "fail",
+      firstChunkReceived: false,
+      message: "Stream timeout",
+      elapsedMs: Date.now() - startedAt,
+    });
+  }
+
+  return NextResponse.json({
+    status: "ok",
+    firstChunkReceived: true,
+    rateLimited: false,
+    message: "Stream OK",
+    elapsedMs: Date.now() - startedAt,
+    details: {
+      preview: firstChunk.slice(0, 80),
+    },
+  });
+}
+
+function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
+  const startedAt = Date.now();
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        let chunkCount = 0;
+        let charCount = 0;
+        let firstChunkElapsedMs: number | null = null;
+        let preview = "";
+
+        const write = (event: string, data: unknown) => {
+          controller.enqueue(encoder.encode(toSse(event, data)));
+        };
+
+        try {
+          const { systemPrompt, userPrompt } = createPrompt(prompt);
+          write("meta", {
+            provider: config.provider,
+            model: config.model,
+            maxTokens,
+            promptPreview: userPrompt.slice(0, 120),
+          });
+
+          for await (const chunk of callLLMStream(
+            systemPrompt,
+            userPrompt,
+            maxTokens,
+            config,
+            { temperature: 0.2 }
+          )) {
+            const text = chunk.text;
+            if (!text) continue;
+
+            chunkCount += 1;
+            charCount += text.length;
+            preview = `${preview}${text}`.slice(-1200);
+
+            const elapsedMs = Date.now() - startedAt;
+            if (firstChunkElapsedMs === null) {
+              firstChunkElapsedMs = elapsedMs;
+            }
+
+            write("chunk", {
+              text,
+              chunkCount,
+              charCount,
+              elapsedMs,
+            });
+          }
+
+          const elapsedMs = Date.now() - startedAt;
+          write("complete", {
+            elapsedMs,
+            chunkCount,
+            charCount,
+            firstChunkElapsedMs,
+            preview,
+          });
+        } catch (error) {
+          const normalized = normalizeLLMError(error);
+          write("error", {
+            elapsedMs: Date.now() - startedAt,
+            code: normalized.code,
+            retryable: normalized.retryable,
+            error: normalized.message,
+            ...(normalized.status ? { upstreamStatus: normalized.status } : {}),
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    }
+  );
 }
 
 export async function POST(request: Request) {
   const startedAt = Date.now();
 
   try {
-    const body = await request.json();
-    const provider = body.provider === "ollama" ? "ollama" : "openrouter";
-    const model = typeof body.model === "string" ? body.model : "";
-    const ollamaUrl =
-      typeof body.ollamaUrl === "string" ? body.ollamaUrl : undefined;
+    const body = (await request.json()) as Record<string, unknown>;
+    const mode = body.mode === "stream" ? "stream" : "probe";
+    const config = createConfig(body);
 
-    if (!model) {
+    if (!config) {
       return NextResponse.json({
         status: "fail",
         firstChunkReceived: false,
@@ -151,109 +228,19 @@ export async function POST(request: Request) {
       });
     }
 
-    console.info("[api/llm/stream-test] probe_started", {
-      provider,
-      model,
-    });
-
-    const signal = AbortSignal.timeout(8000);
-    let firstChunk = "";
-
-    if (provider === "openrouter") {
-      const apiKey = process.env.OPENROUTER_API_KEY || "";
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        signal,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "Hello" }],
-          stream: true,
-          max_tokens: 16,
-          temperature: 0,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new LLMRequestError(
-          "upstream_http_error",
-          `OpenRouter API error: ${response.status} ${await response.text()}`,
-          {
-            status: response.status,
-            retryable: response.status === 429 || response.status >= 500,
-          }
-        );
-      }
-
-      firstChunk = await readFirstSseChunk(response);
-    } else {
-      const baseUrl = ollamaUrl || "http://localhost:11434";
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "Hello" }],
-          stream: true,
-          options: {
-            num_predict: 16,
-            temperature: 0,
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        throw new LLMRequestError(
-          "upstream_http_error",
-          `Ollama API error: ${response.status} ${await response.text()}`,
-          {
-            status: response.status,
-            retryable: response.status >= 500,
-          }
-        );
-      }
-
-      firstChunk = await readFirstNdjsonChunk(response);
+    if (mode === "stream") {
+      const prompt =
+        typeof body.prompt === "string" ? body.prompt : "";
+      const maxTokensRaw =
+        typeof body.maxTokens === "number" ? body.maxTokens : 192;
+      const maxTokens = Math.max(32, Math.min(1024, Math.floor(maxTokensRaw)));
+      return runBenchmark(config, prompt, maxTokens);
     }
 
-    if (!firstChunk) {
-      return NextResponse.json({
-        status: "fail",
-        firstChunkReceived: false,
-        message: "Stream timeout",
-        elapsedMs: Date.now() - startedAt,
-      });
-    }
-
-    console.info("[api/llm/stream-test] probe_succeeded", {
-      provider,
-      model,
-      preview: firstChunk.slice(0, 40),
-    });
-
-    return NextResponse.json({
-      status: "ok",
-      firstChunkReceived: true,
-      rateLimited: false,
-      message: "Stream OK",
-      elapsedMs: Date.now() - startedAt,
-      details: {
-        preview: firstChunk.slice(0, 80),
-      },
-    });
+    return runProbe(config);
   } catch (error) {
     const normalized = normalizeLLMError(error);
     const failure = classifyFailure(normalized);
-    console.warn("[api/llm/stream-test] probe_failed", {
-      code: normalized.code,
-      message: normalized.message,
-      upstreamStatus: normalized.status,
-      elapsedMs: Date.now() - startedAt,
-    });
     return NextResponse.json({
       ...failure,
       elapsedMs: Date.now() - startedAt,
