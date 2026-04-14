@@ -9,11 +9,12 @@ import * as clientFs from "@/lib/storage/client-fs";
 interface DropZoneProps {
   onClose: () => void;
   onComplete: () => void;
+  initialFile?: File | null;
 }
 
-export default function DropZone({ onClose, onComplete }: DropZoneProps) {
+export default function DropZone({ onClose, onComplete, initialFile = null }: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(initialFile);
   const [fileType, setFileType] = useState<
     "article" | "paper" | "note" | "data"
   >("article");

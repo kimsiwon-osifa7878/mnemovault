@@ -19,6 +19,7 @@ import { getUncompiledCount } from "@/lib/compile/get-uncompiled";
 interface SidebarProps {
   onPageSelect: (slug: string) => void;
   onIngestClick: () => void;
+  onIngestDrop: (file: File) => void;
   onNewPage: () => void;
   onSettingsClick?: () => void;
   onStorageClick?: () => void;
@@ -34,6 +35,7 @@ interface TreeSection {
 export default function Sidebar({
   onPageSelect,
   onIngestClick,
+  onIngestDrop,
   onNewPage,
   onSettingsClick,
   onStorageClick,
@@ -47,6 +49,8 @@ export default function Sidebar({
     new Set(["concepts", "entities", "sources", "analyses"])
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSidebarDragging, setIsSidebarDragging] = useState(false);
+  const [isIngestDragging, setIsIngestDragging] = useState(false);
 
   useEffect(() => {
     fetchPages();
@@ -112,8 +116,62 @@ export default function Sidebar({
     (p) => p.slug === "index" || p.slug === "log"
   );
 
+  const handleIngestDragOver = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isIngestDragging) setIsIngestDragging(true);
+    if (!isSidebarDragging) setIsSidebarDragging(true);
+  };
+
+  const handleIngestDragLeave = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsIngestDragging(false);
+    setIsSidebarDragging(false);
+  };
+
+  const handleIngestDrop = (e: React.DragEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsIngestDragging(false);
+    setIsSidebarDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) onIngestDrop(droppedFile);
+  };
+
+  const handleSidebarDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!isSidebarDragging) setIsSidebarDragging(true);
+  };
+
+  const handleSidebarDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsSidebarDragging(false);
+      setIsIngestDragging(false);
+    }
+  };
+
+  const handleSidebarDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsSidebarDragging(false);
+    setIsIngestDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) onIngestDrop(droppedFile);
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#0d0d14] border-r border-white/10">
+    <div
+      className={`flex h-full flex-col border-r transition-colors ${
+        isSidebarDragging
+          ? "border-emerald-400/50 bg-emerald-500/[0.04]"
+          : "border-white/10 bg-[#0d0d14]"
+      }`}
+      onDragOver={handleSidebarDragOver}
+      onDragEnter={handleSidebarDragOver}
+      onDragLeave={handleSidebarDragLeave}
+      onDrop={handleSidebarDrop}
+    >
       {/* Header */}
       <div className="p-3 border-b border-white/10">
         <h2 className="text-sm font-semibold text-white/80 tracking-wider uppercase">
@@ -246,10 +304,21 @@ export default function Sidebar({
         </button>
         <button
           onClick={onIngestClick}
-          className="flex items-center gap-2 w-full px-3 py-1.5 rounded text-xs bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+          onDragOver={handleIngestDragOver}
+          onDragEnter={handleIngestDragOver}
+          onDragLeave={handleIngestDragLeave}
+          onDrop={handleIngestDrop}
+          className={`flex min-h-[84px] w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-3 text-xs transition-colors ${
+            isIngestDragging
+              ? "border-emerald-300 bg-emerald-500/15 text-emerald-300"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
+          }`}
         >
-          <Upload className="w-3.5 h-3.5" />
-          Ingest Source
+          <Upload className="h-4 w-4" />
+          <span className="font-medium">Ingest Source</span>
+          <span className="text-[10px] text-current/70">
+            Drop a document here to save immediately
+          </span>
         </button>
       </div>
     </div>

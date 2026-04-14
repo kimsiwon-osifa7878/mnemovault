@@ -42,6 +42,7 @@ function IDELayout() {
   const [rightTab, setRightTab] = useState<RightTab>("graph");
   const [backlinks, setBacklinks] = useState<string[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
+  const [ingestFile, setIngestFile] = useState<File | null>(null);
   const dragModeRef = useRef<"editor" | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +71,16 @@ function IDELayout() {
     fetchPages();
     fetchGraph();
   }, [fetchPages, fetchGraph]);
+
+  const handleIngestOpen = useCallback(() => {
+    setIngestFile(null);
+    setShowIngest(true);
+  }, []);
+
+  const handleIngestDrop = useCallback((file: File) => {
+    setIngestFile(file);
+    setShowIngest(true);
+  }, []);
 
   const handleCompileComplete = useCallback(() => {
     fetchPages();
@@ -142,7 +153,8 @@ function IDELayout() {
       <div className="w-56 shrink-0">
         <Sidebar
           onPageSelect={handlePageSelect}
-          onIngestClick={() => setShowIngest(true)}
+          onIngestClick={handleIngestOpen}
+          onIngestDrop={handleIngestDrop}
           onNewPage={() => setShowNewPage(true)}
           onSettingsClick={() => setShowLLMSettings(true)}
           onStorageClick={() => setShowStorageSettings(true)}
@@ -252,7 +264,11 @@ function IDELayout() {
       {/* Modals */}
       {showIngest && (
         <DropZone
-          onClose={() => setShowIngest(false)}
+          initialFile={ingestFile}
+          onClose={() => {
+            setShowIngest(false);
+            setIngestFile(null);
+          }}
           onComplete={handleIngestComplete}
         />
       )}
