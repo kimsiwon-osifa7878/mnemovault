@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { LLMRequestError, normalizeLLMError } from "./errors";
 
 describe("normalizeLLMError", () => {
+  it("maps abort errors to aborted code", () => {
+    const err = new DOMException("The operation was aborted.", "AbortError");
+    const normalized = normalizeLLMError(err);
+
+    expect(normalized.code).toBe("aborted");
+    expect(normalized.retryable).toBe(false);
+  });
+
   it("maps timeout-style errors to timeout code", () => {
     const err = new Error("Headers Timeout Error: UND_ERR_HEADERS_TIMEOUT");
     const normalized = normalizeLLMError(err);

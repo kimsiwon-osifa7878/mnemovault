@@ -6,6 +6,9 @@ export interface UncompiledFile {
 }
 
 export type CompileLogScope = "session" | "file" | "llm_stream";
+export type CompileFileStatus = "idle" | "queued" | "compiling" | "success" | "failed" | "stopped";
+export type CompileSessionStatus = "idle" | "running" | "stopped" | "done" | "error";
+export type CompileErrorKind = "error" | "aborted";
 
 export interface CompileLogEntry {
   timestamp: number;
@@ -22,6 +25,8 @@ export interface CompileFileResult {
   sourceSlug: string;
   createdSlugs: string[];
   updatedSlugs: string[];
+  status: CompileFileStatus;
+  errorKind?: CompileErrorKind;
   processedMeta?: ProcessedFileMeta;
   error?: string;
   logs: CompileLogEntry[];
@@ -31,11 +36,15 @@ export interface CompileProgress {
   total: number;
   completed: number;
   currentFile: string;
+  currentFilePath?: string;
+  queuedPaths: string[];
+  fileStatuses: Record<string, CompileFileStatus>;
   results: CompileFileResult[];
   activeLogsByFile: Record<string, CompileLogEntry[]>;
   streamTextByFile: Record<string, string>;
-  status: "idle" | "running" | "done" | "error";
+  status: CompileSessionStatus;
   startedAt: number;
+  stoppedAt?: number;
   sessionLogPath?: string;
 }
 
@@ -50,9 +59,11 @@ export interface CompileSessionEvent {
   kind:
     | "session_start"
     | "session_done"
+    | "session_stopped"
     | "file_start"
     | "file_done"
     | "file_error"
+    | "file_stopped"
     | "log"
     | "llm_chunk";
   timestamp: string;

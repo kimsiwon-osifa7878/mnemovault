@@ -11,6 +11,12 @@ function toSse(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+function throwIfAborted(signal: AbortSignal) {
+  if (signal.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+}
+
 function buildDebugPayload(args: {
   requestId: string;
   fileName: string;
@@ -78,7 +84,12 @@ export async function POST(request: Request) {
     }
 
     const config: LLMConfig | undefined = llmConfig
-      ? { provider: llmConfig.provider, model: llmConfig.model, ollamaUrl: llmConfig.ollamaUrl }
+      ? {
+          provider: llmConfig.provider,
+          model: llmConfig.model,
+          ollamaUrl: llmConfig.ollamaUrl,
+          contextTokens: llmConfig.contextTokens,
+        }
       : undefined;
 
     const lang = (language === "ko" ? "ko" : "en") as "en" | "ko";
@@ -94,12 +105,24 @@ export async function POST(request: Request) {
       async start(controller) {
         const encoder = new TextEncoder();
         let rawResponse = "";
+        const closeOnAbort = () => {
+          try {
+            controller.close();
+          } catch {
+            // Ignore close races after abort.
+          }
+        };
+        request.signal.addEventListener("abort", closeOnAbort, { once: true });
 
         const write = (event: string, data: unknown) => {
+          if (request.signal.aborted) {
+            return;
+          }
           controller.enqueue(encoder.encode(toSse(event, data)));
         };
 
         try {
+          throwIfAborted(request.signal);
           let ingestMode: "stream" | "fallback_non_stream" = "stream";
           write("meta", {
             requestId,
@@ -126,8 +149,10 @@ export async function POST(request: Request) {
             {
               requireJson: true,
               temperature: 0,
+              signal: request.signal,
             }
           )) {
+            throwIfAborted(request.signal);
             rawResponse += chunk.text;
             write("chunk", { text: chunk.text });
           }
@@ -152,27 +177,34 @@ export async function POST(request: Request) {
               fileType,
               config,
               typeof wikiContext === "string" ? wikiContext : "",
-              lang
+              lang,
+              request.signal
             );
             ingestMode = "fallback_non_stream";
           }
 
+          throwIfAborted(request.signal);
           write("complete", { ...result, requestId, ingestMode });
         } catch (error) {
           const normalized = normalizeLLMError(error);
-          write("error", {
-            requestId,
-            code: normalized.code,
-            retryable: normalized.retryable,
-            elapsedMs: Date.now() - startedAt,
-            error: normalized.message,
-            ...(normalized.status ? { upstreamStatus: normalized.status } : {}),
-            ...(rawResponse
-              ? { responsePreview: rawResponse.slice(0, 400) }
-              : {}),
-          });
+          if (!request.signal.aborted) {
+            write("error", {
+              requestId,
+              code: normalized.code,
+              retryable: normalized.retryable,
+              elapsedMs: Date.now() - startedAt,
+              error: normalized.message,
+              ...(normalized.status ? { upstreamStatus: normalized.status } : {}),
+              ...(rawResponse
+                ? { responsePreview: rawResponse.slice(0, 400) }
+                : {}),
+            });
+          }
         } finally {
-          controller.close();
+          request.signal.removeEventListener("abort", closeOnAbort);
+          if (!request.signal.aborted) {
+            controller.close();
+          }
         }
       },
     });

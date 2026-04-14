@@ -1,4 +1,5 @@
 import { callLLM, LLMConfig } from "./client";
+import { parseJsonWithAutoClose } from "./ingest";
 import { getPrompt } from "./prompt-store";
 
 export interface LLMLintResult {
@@ -23,7 +24,7 @@ export async function detectContradictions(
 
     const jsonMatch = llmResponse.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      return parseJsonWithAutoClose<LLMLintResult[]>(jsonMatch[0]);
     }
     return [];
   } catch {

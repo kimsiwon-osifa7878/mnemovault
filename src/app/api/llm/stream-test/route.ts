@@ -69,14 +69,18 @@ function createConfig(body: Record<string, unknown>): LLMConfig | null {
   const model = typeof body.model === "string" ? body.model : "";
   const ollamaUrl =
     typeof body.ollamaUrl === "string" ? body.ollamaUrl : undefined;
+  const contextTokens =
+    typeof body.contextTokens === "number" && Number.isFinite(body.contextTokens)
+      ? Math.max(0, Math.floor(body.contextTokens))
+      : undefined;
 
   if (!model) {
     return null;
   }
 
   return provider === "ollama"
-    ? { provider, model, ollamaUrl }
-    : { provider, model };
+    ? { provider, model, ollamaUrl, contextTokens }
+    : { provider, model, contextTokens };
 }
 
 function createPrompt(prompt: string): { systemPrompt: string; userPrompt: string } {

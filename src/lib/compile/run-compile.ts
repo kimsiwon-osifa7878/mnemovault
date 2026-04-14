@@ -9,10 +9,11 @@ import { generateIndexContent } from "@/lib/wiki/index-manager";
 import { appendLogEntry } from "@/lib/wiki/log-manager";
 import { compileFile } from "./compile-file";
 import type {
-  UncompiledFile,
   CompileFileResult,
   CompileLogEntry,
   CompileProgress,
+  CompileSessionEvent,
+  UncompiledFile,
 } from "./types";
 import { normalizeProcessedFilesRecord } from "./processed-files";
 import {
@@ -27,21 +28,71 @@ interface LLMConfig {
   ollamaUrl?: string;
 }
 
+interface RunCompileOptions {
+  logEnabled?: boolean;
+  signal?: AbortSignal;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === "AbortError"
+  ) || (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message.toLowerCase().includes("aborted"))
+  );
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+}
+
+function createStoppedResult(file: UncompiledFile): CompileFileResult {
+  return {
+    file,
+    sourceSlug: "",
+    createdSlugs: [],
+    updatedSlugs: [],
+    status: "stopped",
+    errorKind: "aborted",
+    logs: [],
+  };
+}
+
+function createStoppedEvent(file: UncompiledFile): CompileSessionEvent {
+  return {
+    kind: "file_stopped",
+    timestamp: new Date().toISOString(),
+    filePath: file.path,
+    payload: {
+      fileName: file.fileName,
+      fileType: file.fileType,
+      reason: file.reason,
+    },
+  };
+}
+
 export async function runCompile(
   root: FileSystemDirectoryHandle,
   files: UncompiledFile[],
   llmConfig: LLMConfig,
   onProgress: (progress: CompileProgress) => void,
   language: "en" | "ko" = "en",
-  options?: { logEnabled?: boolean }
+  options?: RunCompileOptions
 ): Promise<CompileFileResult[]> {
   const startedAt = Date.now();
   const logEnabled = options?.logEnabled ?? true;
+  const signal = options?.signal;
   const sessionPaths = logEnabled ? createCompileSessionPaths(startedAt) : null;
+  const fileStatuses = Object.fromEntries(files.map((file) => [file.path, "queued" as const]));
   const progress: CompileProgress = {
     total: files.length,
     completed: 0,
     currentFile: "",
+    currentFilePath: undefined,
+    queuedPaths: files.map((file) => file.path),
+    fileStatuses,
     results: [],
     activeLogsByFile: {},
     streamTextByFile: {},
@@ -56,6 +107,8 @@ export async function runCompile(
     onProgress({
       ...progress,
       results: [...progress.results],
+      queuedPaths: [...progress.queuedPaths],
+      fileStatuses: { ...progress.fileStatuses },
       activeLogsByFile: Object.fromEntries(
         Object.entries(progress.activeLogsByFile).map(([path, logs]) => [path, [...logs]])
       ),
@@ -80,6 +133,19 @@ export async function runCompile(
     );
     sessionWriteQueue = write.catch(() => undefined);
     return write;
+  };
+
+  const markRemainingAsStopped = async (remainingFiles: UncompiledFile[]) => {
+    if (remainingFiles.length === 0) return;
+
+    for (const file of remainingFiles) {
+      progress.fileStatuses[file.path] = "stopped";
+      progress.queuedPaths = progress.queuedPaths.filter((path) => path !== file.path);
+      progress.results.push(createStoppedResult(file));
+      if (logEnabled) {
+        await queueSessionEvent(createStoppedEvent(file));
+      }
+    }
   };
 
   if (logEnabled) {
@@ -109,90 +175,147 @@ export async function runCompile(
     await readJsonFile(root, "meta/processed_files.json")
   );
 
-  for (const file of files) {
-    progress.currentFile = file.fileName;
-    progress.activeLogsByFile[file.path] = [];
-    progress.streamTextByFile[file.path] = progress.streamTextByFile[file.path] || "";
-    if (logEnabled) {
-      await queueSessionEvent({
-        kind: "file_start",
-        timestamp: new Date().toISOString(),
-        filePath: file.path,
-        payload: {
-          fileName: file.fileName,
-          fileType: file.fileType,
-          reason: file.reason,
+  try {
+    for (let index = 0; index < files.length; index++) {
+      const file = files[index];
+      throwIfAborted(signal);
+
+      progress.currentFile = file.fileName;
+      progress.currentFilePath = file.path;
+      progress.fileStatuses[file.path] = "compiling";
+      progress.queuedPaths = progress.queuedPaths.filter((path) => path !== file.path);
+      progress.activeLogsByFile[file.path] = [];
+      progress.streamTextByFile[file.path] = progress.streamTextByFile[file.path] || "";
+      if (logEnabled) {
+        await queueSessionEvent({
+          kind: "file_start",
+          timestamp: new Date().toISOString(),
+          filePath: file.path,
+          payload: {
+            fileName: file.fileName,
+            fileType: file.fileType,
+            reason: file.reason,
+          },
+        });
+      }
+      emitProgress();
+
+      const result = await compileFile(root, file, llmConfig, existingSlugs, language, {
+        emitLog: async (entry: CompileLogEntry) => {
+          if (!logEnabled) return;
+          progress.activeLogsByFile[file.path] = [...(progress.activeLogsByFile[file.path] || []), entry];
+          void queueSessionEvent(buildLogEntryEvent(entry));
+          scheduleEmitProgress();
         },
+        emitStreamChunk: async (filePath: string, chunk: string) => {
+          progress.streamTextByFile[filePath] = `${progress.streamTextByFile[filePath] || ""}${chunk}`;
+          scheduleEmitProgress();
+        },
+      }, {
+        logEnabled,
+        signal,
       });
-    }
-    emitProgress();
 
-    const result = await compileFile(root, file, llmConfig, existingSlugs, language, {
-      emitLog: async (entry: CompileLogEntry) => {
-        if (!logEnabled) return;
-        progress.activeLogsByFile[file.path] = [...(progress.activeLogsByFile[file.path] || []), entry];
-        void queueSessionEvent(buildLogEntryEvent(entry));
-        scheduleEmitProgress();
-      },
-      emitStreamChunk: async (filePath: string, chunk: string) => {
-        progress.streamTextByFile[filePath] = `${progress.streamTextByFile[filePath] || ""}${chunk}`;
-        scheduleEmitProgress();
-      },
-    }, {
-      logEnabled,
-    });
-    if (!logEnabled) {
-      result.logs = [];
-    }
-    progress.results.push(result);
+      if (!logEnabled) {
+        result.logs = [];
+      }
 
-    // Update processed_files.json immediately per file
-    if (!result.error && result.processedMeta) {
-      processed[file.path] = result.processedMeta;
-      await writeFile(
-        root,
-        "meta/processed_files.json",
-        JSON.stringify(processed, null, 2)
+      progress.results.push(result);
+      progress.fileStatuses[file.path] = result.status;
+
+      if (result.status === "success" && result.processedMeta) {
+        processed[file.path] = result.processedMeta;
+        await writeFile(
+          root,
+          "meta/processed_files.json",
+          JSON.stringify(processed, null, 2)
+        );
+      }
+
+      if (logEnabled) {
+        await queueSessionEvent({
+          kind:
+            result.status === "stopped"
+              ? "file_stopped"
+              : result.status === "failed"
+                ? "file_error"
+                : "file_done",
+          timestamp: new Date().toISOString(),
+          filePath: file.path,
+          payload: {
+            error: result.error,
+            errorKind: result.errorKind,
+            createdSlugs: result.createdSlugs,
+            updatedSlugs: result.updatedSlugs,
+          },
+        });
+      }
+
+      progress.completed++;
+      emitProgress();
+
+      if (result.status === "stopped") {
+        await markRemainingAsStopped(files.slice(index + 1));
+        progress.completed += files.length - (index + 1);
+        progress.status = "stopped";
+        progress.stoppedAt = Date.now();
+        break;
+      }
+    }
+  } catch (error) {
+    if (isAbortError(error)) {
+      if (
+        progress.currentFilePath &&
+        !progress.results.some((result) => result.file.path === progress.currentFilePath)
+      ) {
+        const currentFile = files.find((file) => file.path === progress.currentFilePath);
+        if (currentFile) {
+          progress.fileStatuses[currentFile.path] = "stopped";
+          progress.results.push(createStoppedResult(currentFile));
+          progress.completed++;
+          if (logEnabled) {
+            await queueSessionEvent(createStoppedEvent(currentFile));
+          }
+        }
+      }
+      const remainingFiles = files.filter(
+        (file) => !progress.results.some((result) => result.file.path === file.path) && progress.currentFilePath !== file.path
       );
+      await markRemainingAsStopped(remainingFiles);
+      progress.completed += remainingFiles.length;
+      progress.status = "stopped";
+      progress.stoppedAt = Date.now();
+    } else {
+      progress.status = "error";
+      throw error;
     }
-
-    if (logEnabled) {
-      await queueSessionEvent({
-        kind: result.error ? "file_error" : "file_done",
-        timestamp: new Date().toISOString(),
-        filePath: file.path,
-        payload: {
-          error: result.error,
-          createdSlugs: result.createdSlugs,
-          updatedSlugs: result.updatedSlugs,
-        },
-      });
-    }
-    progress.completed++;
-    emitProgress();
   }
 
   // Regenerate index.md from all wiki pages
-  try {
-    const allWikiFiles = await listFiles(root, "wiki");
-    const pages = [];
-    for (const f of allWikiFiles) {
-      const raw = await readFile(root, f);
-      const filename = f.split("/").pop() || f;
-      pages.push(parseWikiPage(filename, raw));
+  const successfulResults = progress.results.filter((result) => result.status === "success");
+  if (successfulResults.length > 0) {
+    try {
+      const allWikiFiles = await listFiles(root, "wiki");
+      const pages = [];
+      for (const f of allWikiFiles) {
+        const raw = await readFile(root, f);
+        const filename = f.split("/").pop() || f;
+        pages.push(parseWikiPage(filename, raw));
+      }
+      const indexContent = generateIndexContent(pages);
+      await writeFile(root, "wiki/index.md", indexContent);
+    } catch {
+      // Non-fatal: index regeneration failure
     }
-    const indexContent = generateIndexContent(pages);
-    await writeFile(root, "wiki/index.md", indexContent);
-  } catch {
-    // Non-fatal: index regeneration failure
   }
 
   // Append to log.md
-  if (logEnabled) {
+  if (logEnabled && successfulResults.length > 0) {
     try {
       const logContent = await readFile(root, "wiki/log.md");
-      const successResults = progress.results.filter((r) => !r.error);
-      const failedResults = progress.results.filter((r) => r.error);
+      const successResults = successfulResults;
+      const failedResults = progress.results.filter((r) => r.status === "failed");
+      const stoppedResults = progress.results.filter((r) => r.status === "stopped");
 
       const details: string[] = [];
       for (const r of successResults) {
@@ -205,6 +328,9 @@ export async function runCompile(
       }
       if (failedResults.length > 0) {
         details.push(`Failed: ${failedResults.map((r) => r.file.fileName).join(", ")}`);
+      }
+      if (stoppedResults.length > 0) {
+        details.push(`Stopped: ${stoppedResults.map((r) => r.file.fileName).join(", ")}`);
       }
       if (sessionPaths?.jsonlPath) {
         details.push(`Session log: ${sessionPaths.jsonlPath}`);
@@ -220,20 +346,24 @@ export async function runCompile(
   }
   if (logEnabled) {
     await queueSessionEvent({
-      kind: "session_done",
+      kind: progress.status === "stopped" ? "session_stopped" : "session_done",
       timestamp: new Date().toISOString(),
       payload: {
         completed: progress.completed,
-        succeeded: progress.results.filter((result) => !result.error).length,
-        failed: progress.results.filter((result) => !!result.error).length,
+        succeeded: progress.results.filter((result) => result.status === "success").length,
+        failed: progress.results.filter((result) => result.status === "failed").length,
+        stopped: progress.results.filter((result) => result.status === "stopped").length,
         sessionLogPath: sessionPaths?.jsonlPath,
       },
     });
   }
   await sessionWriteQueue;
 
-  progress.status = "done";
+  if (progress.status === "running") {
+    progress.status = "done";
+  }
   progress.currentFile = "";
+  progress.currentFilePath = undefined;
   if (progressFlushTimer) {
     clearTimeout(progressFlushTimer);
     progressFlushTimer = null;

@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useLLMStore } from "@/stores/llm-store";
-import { DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL } from "@/lib/llm/defaults";
+import {
+  DEFAULT_OLLAMA_CONTEXT_TOKENS,
+  DEFAULT_OLLAMA_MODEL,
+  DEFAULT_OLLAMA_URL,
+} from "@/lib/llm/defaults";
 import { X, Settings, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 
 interface LLMSettingsProps {
@@ -84,14 +88,18 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const {
     provider,
     openrouterModel,
+    openrouterContextTokens,
     ollamaModel,
     ollamaUrl,
+    ollamaContextTokens,
     language,
     compileLogsEnabled,
     setProvider,
     setOpenRouterModel,
+    setOpenRouterContextTokens,
     setOllamaModel,
     setOllamaUrl,
+    setOllamaContextTokens,
     setLanguage,
     setCompileLogsEnabled,
   } = useLLMStore();
@@ -139,6 +147,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           provider: nextProvider,
           model,
           ollamaUrl: nextOllamaUrl,
+          contextTokens: nextProvider === "ollama" ? ollamaContextTokens : openrouterContextTokens,
         }),
       });
       const data = await res.json();
@@ -174,6 +183,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           provider: nextProvider,
           model,
           ollamaUrl: nextOllamaUrl,
+          contextTokens: nextProvider === "ollama" ? ollamaContextTokens : openrouterContextTokens,
         }),
       });
       const data = await res.json();
@@ -214,6 +224,7 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           provider: nextProvider,
           model,
           ollamaUrl: nextOllamaUrl,
+          contextTokens: nextProvider === "ollama" ? ollamaContextTokens : openrouterContextTokens,
           prompt: streamPrompt,
           maxTokens: 192,
         }),
@@ -514,6 +525,20 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
             <p className="text-[10px] text-white/30">
               API key is configured via OPENROUTER_API_KEY. Model availability comes from the configured model list.
             </p>
+            <div>
+              <label className="text-xs text-white/40 block mb-1">Request Context / Max Tokens</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={openrouterContextTokens}
+                onChange={(e) => setOpenRouterContextTokens(Number(e.target.value) || 0)}
+                className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-violet-500/50 focus:outline-none"
+              />
+              <p className="text-[10px] text-white/30 mt-1">
+                OpenRouter does not expose Ollama-style `num_ctx`; this value is sent as the request token budget (`max_tokens`). Use `0` to keep each feature&apos;s default.
+              </p>
+            </div>
           </div>
         )}
 
@@ -575,6 +600,22 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
                   className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
                 />
               )}
+            </div>
+
+            <div>
+              <label className="text-xs text-white/40 block mb-1">Context Tokens</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={ollamaContextTokens}
+                onChange={(e) => setOllamaContextTokens(Number(e.target.value) || 0)}
+                placeholder={String(DEFAULT_OLLAMA_CONTEXT_TOKENS)}
+                className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/30 focus:border-emerald-500/50 focus:outline-none"
+              />
+              <p className="text-[10px] text-white/30 mt-1">
+                Sent to Ollama as `options.num_ctx`. Use `0` to keep Ollama&apos;s default model setting.
+              </p>
             </div>
 
             <p className="text-[10px] text-white/30">

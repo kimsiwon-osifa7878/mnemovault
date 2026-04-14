@@ -58,6 +58,83 @@ export function extractJsonPayload(text: string): string {
   return text.trim();
 }
 
+function buildMissingJsonClosers(text: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaping = false;
+
+  for (const char of text) {
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaping = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      stack.push("}");
+      continue;
+    }
+
+    if (char === "[") {
+      stack.push("]");
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      const expected = stack.pop();
+      if (expected !== char) {
+        return null;
+      }
+    }
+  }
+
+  if (inString) {
+    return null;
+  }
+
+  return stack.reverse().join("");
+}
+
+export function parseJsonWithAutoClose<T>(text: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch (initialError) {
+    const missingClosers = buildMissingJsonClosers(text);
+    if (!missingClosers) {
+      throw initialError;
+    }
+
+    const candidates = [
+      `${text}${missingClosers}`,
+      `${text.trimEnd()}${missingClosers}`,
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate) as T;
+      } catch {
+        continue;
+      }
+    }
+
+    throw initialError;
+  }
+}
+
 function isEvidenceType(value: unknown): value is EvidenceType {
   return (
     value === "EXTRACTED" || value === "INFERRED" || value === "AMBIGUOUS"
@@ -165,7 +242,7 @@ export function parseIngestLLMResponse(
   const jsonPayload = extractJsonPayload(llmResponse);
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(jsonPayload) as Record<string, unknown>;
+    parsed = parseJsonWithAutoClose<Record<string, unknown>>(jsonPayload);
   } catch (error) {
     throw new LLMRequestError(
       "invalid_response",
@@ -229,7 +306,8 @@ export async function processIngestWithLLM(
   fileType: string,
   llmConfig?: LLMConfig,
   wikiContext: string = "",
-  language: "en" | "ko" = "en"
+  language: "en" | "ko" = "en",
+  signal?: AbortSignal
 ): Promise<IngestLLMResult> {
   const { systemPrompt, userMessage } = await buildIngestPrompt(
     fileName,
@@ -247,6 +325,7 @@ export async function processIngestWithLLM(
     {
       requireJson: true,
       temperature: 0,
+      signal,
     }
   );
 
@@ -260,7 +339,8 @@ export async function processIngestWithLLMStream(
   llmConfig?: LLMConfig,
   wikiContext: string = "",
   language: "en" | "ko" = "en",
-  onChunk?: (text: string) => void | Promise<void>
+  onChunk?: (text: string) => void | Promise<void>,
+  signal?: AbortSignal
 ): Promise<IngestStreamResult> {
   const { systemPrompt, userMessage } = await buildIngestPrompt(
     fileName,
@@ -281,6 +361,7 @@ export async function processIngestWithLLMStream(
     {
       requireJson: true,
       temperature: 0,
+      signal,
     }
   )) {
     rawResponse += chunk.text;

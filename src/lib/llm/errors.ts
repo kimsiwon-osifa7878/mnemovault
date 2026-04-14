@@ -1,4 +1,5 @@
 export type LLMErrorCode =
+  | "aborted"
   | "timeout"
   | "upstream_http_error"
   | "network_error"
@@ -40,12 +41,23 @@ function isTimeoutError(error: unknown): boolean {
   const name = (error.name || "").toLowerCase();
   const message = error.message.toLowerCase();
   return (
-    name.includes("abort") ||
     name.includes("timeout") ||
     message.includes("timeout") ||
     message.includes("timed out") ||
     message.includes("headers timeout") ||
     message.includes("und_err_headers_timeout") ||
+    message.includes("aborted")
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!hasMessage(error)) return false;
+  const name = (error.name || "").toLowerCase();
+  const message = error.message.toLowerCase();
+  return (
+    name.includes("abort") ||
+    message.includes("signal is aborted") ||
+    message.includes("user aborted") ||
     message.includes("aborted")
   );
 }
@@ -65,6 +77,14 @@ function isNetworkError(error: unknown): boolean {
 
 export function normalizeLLMError(error: unknown): LLMRequestError {
   if (error instanceof LLMRequestError) return error;
+
+  if (isAbortError(error)) {
+    return new LLMRequestError(
+      "aborted",
+      "LLM request was cancelled before completion.",
+      { retryable: false, cause: error }
+    );
+  }
 
   if (isTimeoutError(error)) {
     return new LLMRequestError(

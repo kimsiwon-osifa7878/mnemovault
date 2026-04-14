@@ -39,6 +39,21 @@ interface CompileFileHooks {
   emitStreamChunk?: (filePath: string, chunk: string) => Promise<void> | void;
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof DOMException && error.name === "AbortError"
+  ) || (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message.toLowerCase().includes("aborted"))
+  );
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
+}
+
 function buildFrontmatter(fields: Record<string, unknown>): string {
   const lines = ["---"];
   for (const [key, value] of Object.entries(fields)) {
@@ -394,7 +409,7 @@ function sanitizeDebugName(value: string): string {
 
 function buildDebugPath(fileName: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return `meta/llm-debug/${timestamp}-${sanitizeDebugName(fileName)}-ingest-request.json`;
+  return `meta/llm-debug/${timestamp}-${sanitizeDebugName(fileName)}-llm-request.json`;
 }
 
 export async function compileFile(
@@ -404,7 +419,7 @@ export async function compileFile(
   existingSlugs: Set<string>,
   language: "en" | "ko" = "en",
   hooks?: CompileFileHooks,
-  options?: { logEnabled?: boolean }
+  options?: { logEnabled?: boolean; signal?: AbortSignal }
 ): Promise<CompileFileResult> {
   const logs: CompileLogEntry[] = [];
   const result: CompileFileResult = {
@@ -412,14 +427,17 @@ export async function compileFile(
     sourceSlug: "",
     createdSlugs: [],
     updatedSlugs: [],
+    status: "failed",
     logs,
   };
   const logEnabled = options?.logEnabled ?? true;
   const log = logEnabled
     ? createLogger(logs, file.path, hooks)
     : async () => undefined;
+  let abortReader: (() => void) | null = null;
 
   try {
+    throwIfAborted(options?.signal);
     // 1. Read raw file
     await log("info", "file", "Reading raw file", file.path, "read_raw");
     let content: string;
@@ -485,6 +503,7 @@ export async function compileFile(
     const res = await fetch("/api/llm/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: options?.signal,
       body: JSON.stringify(requestBody),
     });
 
@@ -500,6 +519,10 @@ export async function compileFile(
 
     await log("response", "file", "LLM stream connected", undefined, "stream_connected");
     const reader = res.body.getReader();
+    abortReader = () => {
+      void reader.cancel("aborted");
+    };
+    options?.signal?.addEventListener("abort", abortReader, { once: true });
     const decoder = new TextDecoder();
     let buffer = "";
     let rawResponse = "";
@@ -508,6 +531,7 @@ export async function compileFile(
     let debugSaved = false;
     let pendingStreamLog = "";
     let lastStreamLogAt = Date.now();
+    let stopReading = false;
 
     const flushStreamLog = async (force: boolean = false) => {
       if (!pendingStreamLog) return;
@@ -534,6 +558,7 @@ export async function compileFile(
     };
 
     while (true) {
+      throwIfAborted(options?.signal);
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -572,7 +597,7 @@ export async function compileFile(
             await log(
               "request",
               "file",
-              "OpenRouter request debug saved",
+              "LLM request debug saved",
               debugPath,
               "debug_saved"
             );
@@ -580,7 +605,7 @@ export async function compileFile(
             await log(
               "error",
               "file",
-              "Failed to save OpenRouter request debug",
+              "Failed to save LLM request debug",
               (error as Error).message,
               "debug_save_failed"
             );
@@ -605,13 +630,21 @@ export async function compileFile(
         if (message.event === "complete") {
           llmResult = JSON.parse(message.data) as IngestLLMResult;
           await log("response", "file", "LLM stream complete", undefined, "stream_complete");
-          continue;
+          stopReading = true;
+          break;
         }
 
         if (message.event === "error") {
           streamError = message.data;
           await log("error", "file", "LLM stream error", message.data, "stream_error");
+          stopReading = true;
+          void reader.cancel(message.data);
+          break;
         }
+      }
+
+      if (stopReading) {
+        break;
       }
     }
 
@@ -632,6 +665,7 @@ export async function compileFile(
       throw new Error("Invalid streaming ingest response");
     }
 
+    throwIfAborted(options?.signal);
     await log("response", "file", "LLM response OK", JSON.stringify({
       summaryTitle: llmResult.summary?.title,
       updateCount: llmResult.updates_to_existing_pages?.length ?? 0,
@@ -644,7 +678,7 @@ export async function compileFile(
       await log(
         "info",
         "file",
-        "OpenRouter request debug not emitted",
+        "LLM request debug not emitted",
         debugPath,
         "debug_missing"
       );
@@ -825,6 +859,7 @@ export async function compileFile(
       compiled_at: new Date().toISOString(),
       pipeline_version: COMPILE_PIPELINE_VERSION,
     };
+    result.status = "success";
     await log(
       "info",
       "file",
@@ -833,9 +868,22 @@ export async function compileFile(
       "compile_done"
     );
   } catch (e) {
-    result.error = (e as Error).message;
-    if (!logs.some((l) => l.type === "error")) {
-      await log("error", "file", "Unexpected error", (e as Error).message, "compile_error");
+    if (isAbortError(e)) {
+      result.status = "stopped";
+      result.errorKind = "aborted";
+      await log("info", "file", "Compile stopped", undefined, "compile_stopped");
+    } else {
+      result.status = "failed";
+      result.errorKind = "error";
+      result.error = (e as Error).message;
+      if (!logs.some((l) => l.type === "error")) {
+        await log("error", "file", "Unexpected error", (e as Error).message, "compile_error");
+      }
+    }
+  } finally {
+    // Ensure reader cancellation hook is removed even when the request aborts mid-stream.
+    if (abortReader) {
+      options?.signal?.removeEventListener("abort", abortReader);
     }
   }
 

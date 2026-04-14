@@ -1,28 +1,34 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useStorageStore } from "@/stores/storage-store";
-import { useLLMStore } from "@/stores/llm-store";
-import { useWikiStore } from "@/stores/wiki-store";
+import { useEffect, useRef, useState } from "react";
 import { getUncompiledFiles } from "@/lib/compile/get-uncompiled";
 import { runCompile } from "@/lib/compile/run-compile";
-import type { UncompiledFile, CompileProgress, CompileLogEntry } from "@/lib/compile/types";
+import type {
+  CompileFileResult,
+  CompileFileStatus,
+  CompileLogEntry,
+  CompileProgress,
+  UncompiledFile,
+} from "@/lib/compile/types";
+import { useLLMStore } from "@/stores/llm-store";
+import { useStorageStore } from "@/stores/storage-store";
+import { useWikiStore } from "@/stores/wiki-store";
 import {
-  X,
-  Zap,
-  Loader2,
+  AlertCircle,
+  ArrowDownLeft,
+  ArrowUpRight,
   CheckCircle,
-  XCircle,
-  FileText,
-  Clock,
   ChevronDown,
   ChevronRight,
-  ArrowUpRight,
-  ArrowDownLeft,
-  AlertCircle,
-  Info,
-  PenLine,
+  Clock,
   ExternalLink,
+  FileText,
+  Info,
+  Loader2,
+  PenLine,
+  Square,
+  X,
+  XCircle,
 } from "lucide-react";
 
 interface CompileModalProps {
@@ -30,7 +36,12 @@ interface CompileModalProps {
   onComplete: () => void;
 }
 
-type Phase = "loading" | "ready" | "compiling" | "done";
+interface FileJobState {
+  status: CompileFileStatus;
+  result?: CompileFileResult;
+  logs: CompileLogEntry[];
+  streamText: string;
+}
 
 function formatCompileReason(reason: UncompiledFile["reason"]): string {
   switch (reason) {
@@ -53,7 +64,25 @@ function formatElapsed(ms: number): string {
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString("en-US", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function createInitialJobStates(files: UncompiledFile[]): Record<string, FileJobState> {
+  return Object.fromEntries(
+    files.map((file) => [
+      file.path,
+      {
+        status: "idle" as const,
+        logs: [],
+        streamText: "",
+      },
+    ])
+  );
 }
 
 const LOG_ICONS: Record<CompileLogEntry["type"], typeof Info> = {
@@ -88,9 +117,11 @@ function LogEntryRow({ entry }: { entry: CompileLogEntry }) {
         <span className="text-[10px] text-white/20 shrink-0 font-mono">{formatTime(entry.timestamp)}</span>
         <span className={`text-[11px] flex-1 ${color}`}>{entry.label}</span>
         {hasDetail && (
-          expanded
-            ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
-            : <ChevronRight className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          expanded ? (
+            <ChevronDown className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-white/20 shrink-0 mt-0.5" />
+          )
         )}
       </button>
       {expanded && entry.detail && (
@@ -102,13 +133,7 @@ function LogEntryRow({ entry }: { entry: CompileLogEntry }) {
   );
 }
 
-function StreamTextPanel({
-  content,
-  isLive,
-}: {
-  content: string;
-  isLive: boolean;
-}) {
+function StreamTextPanel({ content, isLive }: { content: string; isLive: boolean }) {
   return (
     <div className="px-3 pt-2 pb-2 border-t border-white/5">
       <div className="text-[10px] uppercase tracking-wider text-white/35 mb-2">
@@ -121,14 +146,54 @@ function StreamTextPanel({
   );
 }
 
+function renderStatusIcon(status: CompileFileStatus) {
+  switch (status) {
+    case "queued":
+      return <Clock className="w-3.5 h-3.5 text-white/35 shrink-0" />;
+    case "compiling":
+      return <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />;
+    case "success":
+      return <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />;
+    case "failed":
+      return <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />;
+    case "stopped":
+      return <Square className="w-3.5 h-3.5 text-white/45 shrink-0" />;
+    default:
+      return <div className="w-3.5 h-3.5 rounded-full border border-white/10 shrink-0" />;
+  }
+}
+
+function getRowClasses(status: CompileFileStatus): string {
+  switch (status) {
+    case "compiling":
+      return "bg-amber-500/5 border-amber-500/20";
+    case "success":
+      return "bg-emerald-500/5 border-emerald-500/10";
+    case "failed":
+      return "bg-red-500/5 border-red-500/10";
+    case "stopped":
+      return "bg-white/[0.03] border-white/10";
+    case "queued":
+      return "bg-white/[0.04] border-white/10";
+    default:
+      return "bg-white/[0.02] border-white/5";
+  }
+}
+
 export default function CompileModal({ onClose, onComplete }: CompileModalProps) {
-  const [phase, setPhase] = useState<Phase>("loading");
+  const [isLoading, setIsLoading] = useState(true);
   const [files, setFiles] = useState<UncompiledFile[]>([]);
+  const [jobStates, setJobStates] = useState<Record<string, FileJobState>>({});
   const [progress, setProgress] = useState<CompileProgress | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runControllerRef = useRef<AbortController | null>(null);
+  const jobStatesRef = useRef<Record<string, FileJobState>>({});
+  const activeRunIdRef = useRef(0);
 
   const contentHandle = useStorageStore((s) => s.contentHandle);
   const getConfig = useLLMStore((s) => s.getConfig);
@@ -136,171 +201,333 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
   const compileLogsEnabled = useLLMStore((s) => s.compileLogsEnabled);
   const openFile = useWikiStore((s) => s.openFile);
 
+  const activeCount = files.filter((file) => jobStates[file.path]?.status !== "idle").length;
+  const queuedCount = files.filter((file) => jobStates[file.path]?.status === "queued").length;
+  const compilingCount = files.filter((file) => jobStates[file.path]?.status === "compiling").length;
+  const successCount = files.filter((file) => jobStates[file.path]?.status === "success").length;
+  const failCount = files.filter((file) => jobStates[file.path]?.status === "failed").length;
+  const stoppedCount = files.filter((file) => jobStates[file.path]?.status === "stopped").length;
+  const completedCount = successCount + failCount + stoppedCount;
+  const totalCreated = files.reduce((sum, file) => sum + (jobStates[file.path]?.result?.createdSlugs.length ?? 0), 0);
+  const totalUpdated = files.reduce((sum, file) => sum + (jobStates[file.path]?.result?.updatedSlugs.length ?? 0), 0);
+  const canCompileAll = files.some((file) => {
+    const status = jobStates[file.path]?.status ?? "idle";
+    return status === "idle" || status === "failed" || status === "stopped";
+  });
+  const latestSessionLogPath = progress?.sessionLogPath;
+  const hasActiveWork = compilingCount > 0 || queuedCount > 0;
+
+  useEffect(() => {
+    jobStatesRef.current = jobStates;
+  }, [jobStates]);
+
   useEffect(() => {
     if (!contentHandle) return;
-    getUncompiledFiles(contentHandle).then((result) => {
+
+    let cancelled = false;
+
+    void getUncompiledFiles(contentHandle).then((result) => {
+      if (cancelled) return;
+      const nextStates = createInitialJobStates(result);
       setFiles(result);
-      setPhase("ready");
+      setJobStates(nextStates);
+      jobStatesRef.current = nextStates;
+      setProgress(null);
+      setElapsed(0);
+      setIsRunning(false);
+      setIsStopping(false);
+      setIsLoading(false);
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [contentHandle]);
 
   useEffect(() => {
-    if (phase === "compiling" && progress?.startedAt) {
+    if (progress?.startedAt && (isRunning || isStopping)) {
       timerRef.current = setInterval(() => {
         setElapsed(Date.now() - progress.startedAt);
       }, 1000);
     }
+
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [phase, progress?.startedAt]);
-
-  // Auto-expand the file currently being processed
-  useEffect(() => {
-    if (progress?.currentFile && phase === "compiling") {
-      const currentFile = files.find((f) => f.fileName === progress.currentFile);
-      if (currentFile) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setExpandedFiles((prev) => {
-          const next = new Set(prev);
-          next.add(currentFile.path);
-          return next;
-        });
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
-    }
-  }, [progress?.currentFile, phase, files]);
+    };
+  }, [isRunning, isStopping, progress?.startedAt]);
 
   useEffect(() => {
-    if (!listRef.current || phase !== "compiling") return;
+    if (!listRef.current || (!isRunning && !isStopping)) return;
     const node = listRef.current;
     const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
     if (nearBottom) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [phase, progress]);
+  }, [isRunning, isStopping, jobStates, progress]);
 
-  const handleStartCompile = async () => {
-    if (!contentHandle || files.length === 0) return;
-
-    setPhase("compiling");
-    const config = getConfig();
-
-    await runCompile(contentHandle, files, config, (p) => {
-      setProgress({ ...p });
-      if (p.status === "done") {
-        setPhase("done");
-        if (timerRef.current) clearInterval(timerRef.current);
-        onComplete();
+  const applyProgress = (runId: number, queuedFiles: UncompiledFile[], nextProgress: CompileProgress) => {
+    if (activeRunIdRef.current !== runId) return;
+    setProgress({ ...nextProgress });
+    if (nextProgress.currentFilePath) {
+      setExpandedFiles((prev) => {
+        if (prev.has(nextProgress.currentFilePath!)) return prev;
+        const next = new Set(prev);
+        next.add(nextProgress.currentFilePath!);
+        return next;
+      });
+    }
+    setJobStates((prev) => {
+      const next = { ...prev };
+      for (const file of queuedFiles) {
+        const previous = next[file.path] ?? { status: "idle" as const, logs: [], streamText: "" };
+        next[file.path] = {
+          ...previous,
+          status: nextProgress.fileStatuses[file.path] ?? previous.status,
+          logs: nextProgress.activeLogsByFile[file.path] ?? previous.logs,
+          streamText: nextProgress.streamTextByFile[file.path] ?? previous.streamText,
+        };
       }
-    }, language, {
-      logEnabled: compileLogsEnabled,
+      for (const result of nextProgress.results) {
+        const previous = next[result.file.path] ?? { status: "idle" as const, logs: [], streamText: "" };
+        next[result.file.path] = {
+          ...previous,
+          status: result.status,
+          result,
+          logs: result.logs.length > 0 ? result.logs : previous.logs,
+          streamText: nextProgress.streamTextByFile[result.file.path] ?? previous.streamText,
+        };
+      }
+      jobStatesRef.current = next;
+      return next;
     });
   };
 
+  const startQueuedRun = (queuedFiles: UncompiledFile[]) => {
+    if (!contentHandle || queuedFiles.length === 0 || isRunning || isStopping) return;
+
+    const runId = activeRunIdRef.current + 1;
+    activeRunIdRef.current = runId;
+    const controller = new AbortController();
+    runControllerRef.current = controller;
+    setIsRunning(true);
+
+    const config = getConfig();
+    const successBefore = files.filter((file) => jobStatesRef.current[file.path]?.status === "success").length;
+
+    void runCompile(
+      contentHandle,
+      queuedFiles,
+      config,
+      (nextProgress) => applyProgress(runId, queuedFiles, nextProgress),
+      language,
+      {
+        logEnabled: compileLogsEnabled,
+        signal: controller.signal,
+      }
+    )
+      .catch(() => undefined)
+      .finally(() => {
+        if (activeRunIdRef.current !== runId) {
+          return;
+        }
+        activeRunIdRef.current = 0;
+        runControllerRef.current = null;
+        setIsRunning(false);
+        setIsStopping(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        const successAfter = files.filter((file) => jobStatesRef.current[file.path]?.status === "success").length;
+        if (successAfter > successBefore) {
+          onComplete();
+        }
+        const remainingQueued = files.filter((file) => jobStatesRef.current[file.path]?.status === "queued");
+        if (remainingQueued.length > 0) {
+          window.setTimeout(() => {
+            startQueuedRun(remainingQueued);
+          }, 0);
+        }
+      });
+  };
+
+
+  const enqueueFiles = (targets: UncompiledFile[]) => {
+    if (targets.length === 0 || isStopping) return;
+
+    let queuedAfterUpdate: UncompiledFile[] = [];
+
+    setJobStates((prev) => {
+      const next = { ...prev };
+      for (const file of targets) {
+        const current = prev[file.path] ?? { status: "idle" as const, logs: [], streamText: "" };
+        if (current.status === "queued" || current.status === "compiling" || current.status === "success") {
+          continue;
+        }
+        next[file.path] = {
+          ...current,
+          status: "queued",
+          result: undefined,
+          logs: [],
+          streamText: "",
+        };
+      }
+      jobStatesRef.current = next;
+      queuedAfterUpdate = files.filter((file) => next[file.path]?.status === "queued");
+      return next;
+    });
+
+    if (!isRunning) {
+      window.setTimeout(() => {
+        startQueuedRun(queuedAfterUpdate);
+      }, 0);
+    }
+  };
+
+  const handleCompileAll = () => {
+    enqueueFiles(
+      files.filter((file) => {
+        const status = jobStates[file.path]?.status ?? "idle";
+        return status === "idle" || status === "failed" || status === "stopped";
+      })
+    );
+  };
+
+  const handleStop = () => {
+    if (!isRunning || isStopping) return;
+    const controller = runControllerRef.current;
+    activeRunIdRef.current = 0;
+    setJobStates((prev) => {
+      const next = { ...prev };
+      for (const file of files) {
+        if (next[file.path]?.status === "queued" || next[file.path]?.status === "compiling") {
+          next[file.path] = { ...next[file.path], status: "stopped" };
+        }
+      }
+      jobStatesRef.current = next;
+      return next;
+    });
+    setProgress((prev) => prev ? {
+      ...prev,
+      status: "stopped",
+      currentFile: "",
+      currentFilePath: undefined,
+      queuedPaths: [],
+      stoppedAt: Date.now(),
+    } : prev);
+    setIsRunning(false);
+    setIsStopping(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    runControllerRef.current = null;
+    controller?.abort();
+  };
+
   const handleClose = () => {
-    if (phase === "compiling") return;
+    if (hasActiveWork) return;
     onClose();
   };
 
   const handleOpenLogs = async () => {
-    if (!progress?.sessionLogPath) return;
-    await openFile(progress.sessionLogPath);
+    if (!latestSessionLogPath) return;
+    await openFile(latestSessionLogPath);
     onClose();
   };
 
   const toggleFile = (path: string) => {
     setExpandedFiles((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
       return next;
     });
   };
 
-  const successCount = progress?.results.filter((r) => !r.error).length ?? 0;
-  const failCount = progress?.results.filter((r) => r.error).length ?? 0;
-  const totalCreated = progress?.results.reduce((sum, r) => sum + r.createdSlugs.length, 0) ?? 0;
-  const totalUpdated = progress?.results.reduce((sum, r) => sum + r.updatedSlugs.length, 0) ?? 0;
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-[#0d0d14] border border-white/10 rounded-xl w-full max-w-2xl mx-4 p-6 max-h-[85vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-medium text-white/80 flex items-center gap-2">
-            <Zap className="w-5 h-5 text-amber-400" />
-            Compile Wiki
-          </h2>
-          <button
-            onClick={handleClose}
-            disabled={phase === "compiling"}
-            className="p-1 rounded text-white/30 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Loading Phase */}
-        {phase === "loading" && (
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div className="bg-[#0d0d14] border border-white/10 rounded-xl w-full max-w-2xl mx-4 p-6">
           <div className="flex items-center justify-center py-12 text-white/40">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             Scanning raw files...
           </div>
-        )}
+        </div>
+      </div>
+    );
+  }
 
-        {/* Ready Phase */}
-        {phase === "ready" && (
-          <>
-            {files.length === 0 ? (
-              <div className="text-center py-12">
-                <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
-                <p className="text-white/60 text-sm">All files are compiled.</p>
-                <p className="text-white/30 text-xs mt-1">
-                  Ingest new sources to compile them into wiki pages.
-                </p>
-                <button
-                  onClick={onClose}
-                  className="mt-4 px-4 py-1.5 rounded text-sm bg-white/5 text-white/60 hover:bg-white/10"
-                >
-                  Close
-                </button>
-              </div>
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-[#0d0d14] border border-white/10 rounded-xl w-full max-w-3xl mx-4 p-6 max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between mb-5 gap-3">
+          <div>
+            <h2 className="text-lg font-medium text-white/80 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-amber-400" />
+              Compile Wiki
+            </h2>
+            <p className="text-xs text-white/35 mt-1">
+              {files.length === 0
+                ? "All files are compiled."
+                : `${files.length} uncompiled file(s) loaded. Queue individual files or compile them all.`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isRunning || isStopping ? (
+              <button
+                onClick={handleStop}
+                disabled={isStopping}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/15 text-red-300 hover:bg-red-500/25 disabled:opacity-50"
+              >
+                {isStopping ? "Stopping..." : "Stop"}
+              </button>
             ) : (
-              <>
-                <p className="text-xs text-white/40 mb-3">
-                  {files.length} uncompiled file(s) found. LLM will process each file to generate wiki pages.
-                </p>
-                <div className="flex-1 overflow-y-auto space-y-1 mb-4 max-h-60">
-                  {files.map((f) => (
-                    <div
-                      key={f.path}
-                      className="flex items-center gap-2 px-3 py-2 rounded bg-white/[0.03] border border-white/5"
-                    >
-                      <FileText className="w-3.5 h-3.5 text-amber-400/60 shrink-0" />
-                      <span className="text-sm text-white/70 truncate flex-1">{f.fileName}</span>
-                      <span className="text-[10px] text-white/30 uppercase shrink-0">{f.fileType}</span>
-                      <span className="text-[10px] text-amber-400/60 shrink-0">{formatCompileReason(f.reason)}</span>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={handleStartCompile}
-                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors"
-                >
-                  Start Compile ({files.length} files)
-                </button>
-              </>
+              <button
+                onClick={handleCompileAll}
+                disabled={!canCompileAll}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 disabled:opacity-40"
+              >
+                Compile All
+              </button>
             )}
-          </>
-        )}
+            <button
+              onClick={handleClose}
+              disabled={hasActiveWork}
+              className="p-1 rounded text-white/30 hover:text-white/60 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
 
-        {/* Compiling / Done Phase */}
-        {(phase === "compiling" || phase === "done") && progress && (
+        {files.length === 0 ? (
+          <div className="text-center py-12">
+            <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-3" />
+            <p className="text-white/60 text-sm">Nothing to compile right now.</p>
+            <button
+              onClick={onClose}
+              className="mt-4 px-4 py-1.5 rounded text-sm bg-white/5 text-white/60 hover:bg-white/10"
+            >
+              Close
+            </button>
+          </div>
+        ) : (
           <>
-            {/* Progress bar */}
             <div className="mb-4">
-              <div className="flex items-center justify-between text-xs text-white/40 mb-1.5">
-                <span>{progress.completed} / {progress.total} files</span>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/40 mb-2">
+                <div className="flex items-center gap-3">
+                  <span>{activeCount} in session</span>
+                  <span>{queuedCount} queued</span>
+                  <span>{compilingCount} compiling</span>
+                  <span>{completedCount} finished</span>
+                </div>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   {formatElapsed(elapsed)}
@@ -309,110 +536,93 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
               <div className="h-2 bg-white/5 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-500"
-                  style={{ width: `${progress.total > 0 ? (progress.completed / progress.total) * 100 : 0}%` }}
+                  style={{ width: `${activeCount > 0 ? (completedCount / activeCount) * 100 : 0}%` }}
                 />
               </div>
             </div>
 
-            {/* File list with expandable logs */}
             <div ref={listRef} className="flex-1 overflow-y-auto space-y-1 mb-4 min-h-0">
-              {files.map((f) => {
-                const result = progress.results.find((r) => r.file.path === f.path);
-                const isCurrentFile = phase === "compiling" && progress.currentFile === f.fileName && !result;
-                const isExpanded = expandedFiles.has(f.path);
-                const pageCount = result ? result.createdSlugs.length + result.updatedSlugs.length : 0;
-                const logs = (result?.logs ?? progress.activeLogsByFile[f.path] ?? []).filter(
-                  (entry) => entry.scope !== "llm_stream"
-                );
-                const streamText = progress.streamTextByFile[f.path] || "";
-                const hasStreamText = streamText.trim().length > 0;
-                const shouldShowLogs = compileLogsEnabled && logs.length > 0;
-                const shouldAllowExpand = !!(result || isCurrentFile);
+              {files.map((file) => {
+                const job = jobStates[file.path] ?? { status: "idle" as const, logs: [], streamText: "" };
+                const isExpanded = expandedFiles.has(file.path);
+                const shouldAllowExpand = job.status !== "idle";
+                const logs = job.logs.filter((entry) => entry.scope !== "llm_stream");
+                const hasStreamText = job.streamText.trim().length > 0;
+                const pageCount = (job.result?.createdSlugs.length ?? 0) + (job.result?.updatedSlugs.length ?? 0);
+                const buttonLabel =
+                  job.status === "failed" || job.status === "stopped"
+                    ? "Retry"
+                    : job.status === "queued"
+                      ? "Queued"
+                      : job.status === "compiling"
+                        ? "Compiling"
+                        : job.status === "success"
+                          ? "Compiled"
+                          : "Compile";
+                const buttonDisabled =
+                  isStopping ||
+                  job.status === "queued" ||
+                  job.status === "compiling" ||
+                  job.status === "success";
 
                 return (
-                  <div
-                    key={f.path}
-                    className={`rounded border ${
-                      isCurrentFile
-                        ? "bg-amber-500/5 border-amber-500/20"
-                        : result?.error
-                        ? "bg-red-500/5 border-red-500/10"
-                        : result
-                        ? "bg-white/[0.01] border-white/5"
-                        : "bg-white/[0.02] border-white/5"
-                    }`}
-                  >
-                    {/* File header row — clickable to toggle logs */}
-                    <button
-                      onClick={() => shouldAllowExpand && toggleFile(f.path)}
-                      className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left ${
-                        shouldAllowExpand ? "cursor-pointer" : "cursor-default"
-                      }`}
-                    >
-                      {/* Expand/collapse chevron */}
-                      {shouldAllowExpand ? (
-                        isExpanded
-                          ? <ChevronDown className="w-3 h-3 text-white/20 shrink-0" />
-                          : <ChevronRight className="w-3 h-3 text-white/20 shrink-0" />
-                      ) : (
-                        <div className="w-3 h-3 shrink-0" />
-                      )}
-
-                      {/* Status icon */}
-                      {result ? (
-                        result.error ? (
-                          <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                        ) : (
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )
-                      ) : isCurrentFile ? (
-                        <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                      ) : (
-                        <div className="w-3.5 h-3.5 rounded-full border border-white/10 shrink-0" />
-                      )}
-
-                      <span
-                        className={`truncate flex-1 ${
-                          result?.error ? "text-red-400/70"
-                          : result ? "text-white/50"
-                          : isCurrentFile ? "text-amber-400"
-                          : "text-white/30"
-                        }`}
+                  <div key={file.path} className={`rounded border ${getRowClasses(job.status)}`}>
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <button
+                        onClick={() => shouldAllowExpand && toggleFile(file.path)}
+                        className={`shrink-0 ${shouldAllowExpand ? "cursor-pointer" : "cursor-default"}`}
                       >
-                        {f.fileName}
-                      </span>
-
-                      {result && !result.error && pageCount > 0 && (
-                        <span className="text-[10px] text-emerald-400/60 shrink-0">+{pageCount} pages</span>
-                      )}
-                      {result?.error && (
-                        <span className="text-[10px] text-red-400/60 shrink-0 truncate max-w-40">
-                          {result.error.length > 60 ? result.error.slice(0, 60) + "..." : result.error}
+                        {shouldAllowExpand ? (
+                          isExpanded ? (
+                            <ChevronDown className="w-3 h-3 text-white/20" />
+                          ) : (
+                            <ChevronRight className="w-3 h-3 text-white/20" />
+                          )
+                        ) : (
+                          <div className="w-3 h-3" />
+                        )}
+                      </button>
+                      {renderStatusIcon(job.status)}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-white/75 truncate">{file.fileName}</div>
+                        <div className="flex items-center gap-2 text-[10px] text-white/30 uppercase mt-0.5">
+                          <span>{file.fileType}</span>
+                          <span>{formatCompileReason(file.reason)}</span>
+                          <span>{job.status}</span>
+                        </div>
+                      </div>
+                      {job.result?.error && (
+                        <span className="text-[10px] text-red-300/70 truncate max-w-48">
+                          {job.result.error.length > 60 ? `${job.result.error.slice(0, 60)}...` : job.result.error}
                         </span>
                       )}
-                      {shouldShowLogs && (
-                        <span className="text-[10px] text-white/20 shrink-0">{logs.length} logs</span>
+                      {!job.result?.error && pageCount > 0 && (
+                        <span className="text-[10px] text-emerald-300/70 shrink-0">
+                          +{pageCount} pages
+                        </span>
                       )}
-                    </button>
+                      <button
+                        onClick={() => enqueueFiles([file])}
+                        disabled={buttonDisabled}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-white/5 text-white/65 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {buttonLabel}
+                      </button>
+                    </div>
 
                     {isExpanded && hasStreamText && (
-                      <StreamTextPanel
-                        content={streamText}
-                        isLive={isCurrentFile}
-                      />
+                      <StreamTextPanel content={job.streamText} isLive={job.status === "compiling"} />
                     )}
 
-                    {/* Expanded log entries */}
-                    {isExpanded && shouldShowLogs && (
+                    {isExpanded && compileLogsEnabled && logs.length > 0 && (
                       <div className={`${hasStreamText ? "px-3 pb-2 pt-1" : "px-3 pb-2 pt-1 border-t border-white/5"} space-y-0`}>
-                        {logs.map((entry, i) => (
-                          <LogEntryRow key={i} entry={entry} />
+                        {logs.map((entry, index) => (
+                          <LogEntryRow key={`${entry.timestamp}-${index}`} entry={entry} />
                         ))}
                       </div>
                     )}
 
-                    {/* Expanded but no logs yet (currently processing) */}
-                    {isExpanded && !hasStreamText && isCurrentFile && (
+                    {isExpanded && !hasStreamText && job.status === "compiling" && (
                       <div className="px-3 pb-2 pt-1 border-t border-white/5">
                         <div className="flex items-center gap-1.5 text-[10px] text-white/20">
                           <Loader2 className="w-3 h-3 animate-spin" />
@@ -425,55 +635,45 @@ export default function CompileModal({ onClose, onComplete }: CompileModalProps)
               })}
             </div>
 
-            {/* Done summary */}
-            {phase === "done" && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/20">
-                    <div className="text-emerald-400 font-medium">{successCount} succeeded</div>
-                    <div className="text-emerald-400/50 mt-0.5">
-                      {totalCreated} created, {totalUpdated} updated
-                    </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="px-3 py-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                  <div className="text-emerald-400 font-medium">{successCount} succeeded</div>
+                  <div className="text-emerald-400/50 mt-0.5">
+                    {totalCreated} created, {totalUpdated} updated
                   </div>
-                  {failCount > 0 && (
-                    <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/20">
-                      <div className="text-red-400 font-medium">{failCount} failed</div>
-                      {compileLogsEnabled && progress.sessionLogPath && (
-                        <button
-                          type="button"
-                          onClick={() => void handleOpenLogs()}
-                          className="text-red-400/70 hover:text-red-300 mt-0.5 inline-flex items-center gap-1"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Click to see logs</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
                 </div>
-                {compileLogsEnabled && progress.sessionLogPath && (
-                  <div className="px-3 py-2 rounded bg-white/[0.03] border border-white/5 text-[11px] text-white/45">
-                    Session log: <span className="font-mono">{progress.sessionLogPath}</span>
-                  </div>
-                )}
-                {compileLogsEnabled && progress.sessionLogPath && (
-                  <button
-                    type="button"
-                    onClick={() => void handleOpenLogs()}
-                    className="w-full px-4 py-2 rounded text-sm bg-white/5 text-white/70 hover:bg-white/10 inline-flex items-center justify-center gap-2"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Open Session Logs
-                  </button>
-                )}
-                <button
-                  onClick={onClose}
-                  className="w-full px-4 py-2 rounded text-sm bg-white/5 text-white/60 hover:bg-white/10"
-                >
-                  Done
-                </button>
+                <div className="px-3 py-2 rounded bg-red-500/10 border border-red-500/20">
+                  <div className="text-red-400 font-medium">{failCount} failed</div>
+                  <div className="text-red-400/50 mt-0.5">Retryable in place</div>
+                </div>
+                <div className="px-3 py-2 rounded bg-white/[0.04] border border-white/10">
+                  <div className="text-white/70 font-medium">{stoppedCount} stopped</div>
+                  <div className="text-white/35 mt-0.5">Queue paused by user</div>
+                </div>
               </div>
-            )}
+
+              {compileLogsEnabled && latestSessionLogPath && (
+                <button
+                  type="button"
+                  onClick={() => void handleOpenLogs()}
+                  className="w-full px-4 py-2 rounded text-sm bg-white/5 text-white/70 hover:bg-white/10 inline-flex items-center justify-center gap-2"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Session Logs
+                </button>
+              )}
+
+              {!isRunning && !isStopping && (
+                <button
+                  onClick={handleCompileAll}
+                  disabled={!canCompileAll}
+                  className="w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors disabled:opacity-40"
+                >
+                  Compile All
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>

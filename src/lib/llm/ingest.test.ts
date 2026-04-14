@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   extractJsonPayload,
+  parseJsonWithAutoClose,
   processIngestWithLLM,
   processIngestWithLLMStream,
 } from "./ingest";
@@ -21,6 +22,22 @@ describe("extractJsonPayload", () => {
   it("extracts payload from fenced json blocks", () => {
     const text = 'hello\n```json\n{"summary":{"title":"A"}}\n```\nworld';
     expect(extractJsonPayload(text)).toBe('{"summary":{"title":"A"}}');
+  });
+});
+
+describe("parseJsonWithAutoClose", () => {
+  it("repairs missing closing braces and brackets", () => {
+    const parsed = parseJsonWithAutoClose<{ items: Array<{ name: string }> }>(
+      '{"items":[{"name":"alpha"}'
+    );
+
+    expect(parsed).toEqual({
+      items: [{ name: "alpha" }],
+    });
+  });
+
+  it("still throws when JSON cannot be repaired by adding closers", () => {
+    expect(() => parseJsonWithAutoClose('{"items":[,]')).toThrow();
   });
 });
 
@@ -62,6 +79,16 @@ describe("processIngestWithLLM", () => {
         source_ref: "a.md :: intro",
       },
     ]);
+  });
+
+  it("repairs truncated JSON when only closing characters are missing", async () => {
+    vi.mocked(callLLM).mockResolvedValueOnce(
+      '{"summary":{"title":"T","content":"C","key_takeaways":["k"]},"concepts":[],"entities":[],"tags":[],"updates_to_existing_pages":[],"open_questions":[]'
+    );
+
+    const out = await processIngestWithLLM("a.md", "content", "article");
+    expect(out.summary.title).toBe("T");
+    expect(out.open_questions).toEqual([]);
   });
 });
 

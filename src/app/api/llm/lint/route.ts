@@ -15,7 +15,12 @@ export async function POST(request: Request) {
     }
 
     const config: LLMConfig | undefined = llmConfig
-      ? { provider: llmConfig.provider, model: llmConfig.model, ollamaUrl: llmConfig.ollamaUrl }
+      ? {
+          provider: llmConfig.provider,
+          model: llmConfig.model,
+          ollamaUrl: llmConfig.ollamaUrl,
+          contextTokens: llmConfig.contextTokens,
+        }
       : undefined;
 
     const lang = (language === "ko" ? "ko" : "en") as "en" | "ko";

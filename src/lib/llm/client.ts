@@ -6,11 +6,13 @@ export interface LLMConfig {
   provider: "openrouter" | "ollama";
   model: string;
   ollamaUrl?: string;
+  contextTokens?: number;
 }
 
 export interface LLMCallOptions {
   requireJson?: boolean;
   temperature?: number;
+  signal?: AbortSignal;
 }
 
 export interface LLMStreamChunk {
@@ -86,6 +88,20 @@ export function resolveLLMRequestPolicy(config?: LLMConfig): LLMRequestPolicy {
 function buildTimeoutSignal(timeoutMs: number | null): AbortSignal | undefined {
   if (timeoutMs === null) return undefined;
   return AbortSignal.timeout(timeoutMs);
+}
+
+function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => !!signal);
+  if (activeSignals.length === 0) return undefined;
+  if (activeSignals.length === 1) return activeSignals[0];
+  return AbortSignal.any(activeSignals);
+}
+
+function resolveRequestedTokens(config: LLMConfig | undefined, fallbackMaxTokens: number): number {
+  if (!config?.contextTokens || config.contextTokens <= 0) {
+    return fallbackMaxTokens;
+  }
+  return Math.floor(config.contextTokens);
 }
 
 /** Undici defaults headersTimeout/bodyTimeout to 300s; Ollama often sends headers only after generation completes. */
@@ -206,13 +222,14 @@ async function withRetries<T>(
 async function callOpenRouter(
   systemPrompt: string,
   userMessage: string,
-  model: string,
+  config: LLMConfig,
   maxTokens: number,
   policy: LLMRequestPolicy,
   options?: LLMCallOptions
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY || "";
-  const modelId = toOpenRouterModelId(model);
+  const modelId = toOpenRouterModelId(config.model);
+  const requestedTokens = resolveRequestedTokens(config, maxTokens);
 
   return withRetries(policy, async () => {
     const response = await llFetch(
@@ -223,7 +240,7 @@ async function callOpenRouter(
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        signal: buildTimeoutSignal(policy.timeoutMs),
+        signal: mergeAbortSignals(buildTimeoutSignal(policy.timeoutMs), options?.signal),
         body: JSON.stringify({
           model: modelId,
           messages: [
@@ -236,7 +253,7 @@ async function callOpenRouter(
           ...(typeof options?.temperature === "number"
             ? { temperature: options.temperature }
             : {}),
-          max_tokens: maxTokens,
+          max_tokens: requestedTokens,
         }),
       },
       policy
@@ -264,13 +281,14 @@ async function callOpenRouter(
 async function* callOpenRouterStream(
   systemPrompt: string,
   userMessage: string,
-  model: string,
+  config: LLMConfig,
   maxTokens: number,
   policy: LLMRequestPolicy,
   options?: LLMCallOptions
 ): AsyncGenerator<LLMStreamChunk> {
   const apiKey = process.env.OPENROUTER_API_KEY || "";
-  const modelId = toOpenRouterModelId(model);
+  const modelId = toOpenRouterModelId(config.model);
+  const requestedTokens = resolveRequestedTokens(config, maxTokens);
 
   const response = await llFetch(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -280,7 +298,7 @@ async function* callOpenRouterStream(
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      signal: buildTimeoutSignal(policy.timeoutMs),
+      signal: mergeAbortSignals(buildTimeoutSignal(policy.timeoutMs), options?.signal),
       body: JSON.stringify({
         model: modelId,
         messages: [
@@ -294,7 +312,7 @@ async function* callOpenRouterStream(
         ...(typeof options?.temperature === "number"
           ? { temperature: options.temperature }
           : {}),
-        max_tokens: maxTokens,
+        max_tokens: requestedTokens,
       }),
     },
     policy
@@ -363,7 +381,7 @@ function extractOpenRouterStreamText(payload: OpenRouterStreamPayload): string {
 async function callOllama(
   systemPrompt: string,
   userMessage: string,
-  model: string,
+  config: LLMConfig,
   baseUrl: string,
   maxTokens: number,
   policy: LLMRequestPolicy,
@@ -375,9 +393,9 @@ async function callOllama(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: buildTimeoutSignal(policy.timeoutMs),
+        signal: mergeAbortSignals(buildTimeoutSignal(policy.timeoutMs), options?.signal),
         body: JSON.stringify({
-          model,
+          model: config.model,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
@@ -385,6 +403,9 @@ async function callOllama(
           ...(options?.requireJson ? { format: "json" } : {}),
           stream: false,
           options: {
+            ...(config?.contextTokens && config.contextTokens > 0
+              ? { num_ctx: Math.floor(config.contextTokens) }
+              : {}),
             num_predict: maxTokens,
             ...(typeof options?.temperature === "number"
               ? { temperature: options.temperature }
@@ -415,7 +436,7 @@ async function callOllama(
 async function* callOllamaStream(
   systemPrompt: string,
   userMessage: string,
-  model: string,
+  config: LLMConfig,
   baseUrl: string,
   maxTokens: number,
   policy: LLMRequestPolicy,
@@ -426,9 +447,9 @@ async function* callOllamaStream(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: buildTimeoutSignal(policy.timeoutMs),
+      signal: mergeAbortSignals(buildTimeoutSignal(policy.timeoutMs), options?.signal),
       body: JSON.stringify({
-        model,
+        model: config.model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -436,6 +457,9 @@ async function* callOllamaStream(
         ...(options?.requireJson ? { format: "json" } : {}),
         stream: true,
         options: {
+          ...(config?.contextTokens && config.contextTokens > 0
+            ? { num_ctx: Math.floor(config.contextTokens) }
+            : {}),
           num_predict: maxTokens,
           ...(typeof options?.temperature === "number"
             ? { temperature: options.temperature }
@@ -494,7 +518,7 @@ export async function callLLM(
     return callOllama(
       systemPrompt,
       userMessage,
-      cfg.model,
+      cfg,
       baseUrl,
       maxTokens,
       policy,
@@ -505,7 +529,7 @@ export async function callLLM(
   return callOpenRouter(
     systemPrompt,
     userMessage,
-    cfg.model,
+    cfg,
     maxTokens,
     policy,
     options
@@ -527,7 +551,7 @@ export async function* callLLMStream(
     yield* callOllamaStream(
       systemPrompt,
       userMessage,
-      cfg.model,
+      cfg,
       baseUrl,
       maxTokens,
       policy,
@@ -539,7 +563,7 @@ export async function* callLLMStream(
   yield* callOpenRouterStream(
     systemPrompt,
     userMessage,
-    cfg.model,
+    cfg,
     maxTokens,
     policy,
     options
