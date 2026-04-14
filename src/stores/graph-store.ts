@@ -4,21 +4,40 @@ import { parseWikiPage, buildGraphData } from "@/lib/wiki/parser";
 import * as clientFs from "@/lib/storage/client-fs";
 import { useStorageStore } from "./storage-store";
 
+export interface GraphUiState {
+  fontSize: number;
+  nodeSizeScale: number;
+  velocityDecay: number;
+  showOperationalNodes: boolean;
+  panelSplitRatio: number;
+}
+
 interface GraphState {
   graphData: GraphData;
   selectedNode: string | null;
+  graphUi: GraphUiState;
   isLoading: boolean;
   setGraphData: (data: GraphData) => void;
   setSelectedNode: (nodeId: string | null) => void;
+  setGraphUiPartial: (patch: Partial<GraphUiState>) => void;
   fetchGraph: () => Promise<void>;
 }
 
 export const useGraphStore = create<GraphState>((set) => ({
   graphData: { nodes: [], edges: [] },
   selectedNode: null,
+  graphUi: {
+    fontSize: 10,
+    nodeSizeScale: 0.25,
+    velocityDecay: 0.38,
+    showOperationalNodes: true,
+    panelSplitRatio: 0.62,
+  },
   isLoading: false,
   setGraphData: (graphData) => set({ graphData }),
   setSelectedNode: (selectedNode) => set({ selectedNode }),
+  setGraphUiPartial: (patch) =>
+    set((state) => ({ graphUi: { ...state.graphUi, ...patch } })),
 
   fetchGraph: async () => {
     set({ isLoading: true });

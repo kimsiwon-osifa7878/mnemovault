@@ -39,7 +39,7 @@ function IDELayout() {
   const [showLLMSettings, setShowLLMSettings] = useState(false);
   const [showStorageSettings, setShowStorageSettings] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(true);
-  const [rightTab, setRightTab] = useState<RightTab>("chat");
+  const [rightTab, setRightTab] = useState<RightTab>("graph");
   const [backlinks, setBacklinks] = useState<string[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
   const dragModeRef = useRef<"editor" | null>(null);
