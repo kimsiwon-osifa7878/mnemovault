@@ -83,7 +83,23 @@ function createConfig(body: Record<string, unknown>): LLMConfig | null {
     : { provider, model, contextTokens };
 }
 
-function createPrompt(prompt: string): { systemPrompt: string; userPrompt: string } {
+type BenchmarkLanguage = "en" | "ko";
+
+function resolveLanguage(body: Record<string, unknown>): BenchmarkLanguage {
+  return body.language === "ko" ? "ko" : "en";
+}
+
+function createPrompt(prompt: string, language: BenchmarkLanguage): { systemPrompt: string; userPrompt: string } {
+  if (language === "ko") {
+    return {
+      systemPrompt:
+        "당신은 스트리밍 지연 벤치마크를 수행 중입니다. 평문으로만 응답하고 마크다운 코드 펜스는 사용하지 마세요.",
+      userPrompt:
+        prompt.trim() ||
+        "스트리밍 성능에 대해 12개의 짧은 번호 문장을 작성해 주세요. 각 문장은 10~20단어로 간결하고 자연스럽게 써 주세요.",
+    };
+  }
+
   return {
     systemPrompt:
       "You are running a streaming latency benchmark. Respond plainly and do not use markdown fences.",
@@ -131,7 +147,12 @@ async function runProbe(config: LLMConfig) {
   });
 }
 
-function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
+function runBenchmark(
+  config: LLMConfig,
+  prompt: string,
+  maxTokens: number,
+  language: BenchmarkLanguage
+) {
   const startedAt = Date.now();
   const encoder = new TextEncoder();
 
@@ -149,7 +170,7 @@ function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
         };
 
         try {
-          const { systemPrompt, userPrompt } = createPrompt(prompt);
+          const { systemPrompt, userPrompt } = createPrompt(prompt, language);
           write("meta", {
             provider: config.provider,
             model: config.model,
@@ -162,7 +183,10 @@ function runBenchmark(config: LLMConfig, prompt: string, maxTokens: number) {
             userPrompt,
             maxTokens,
             config,
-            { temperature: 0.2 }
+            {
+              temperature: 0.2,
+              ...(config.provider === "ollama" ? { think: false } : {}),
+            }
           )) {
             const text = chunk.text;
             if (!text) continue;
@@ -241,9 +265,10 @@ export async function POST(request: Request) {
       const prompt =
         typeof body.prompt === "string" ? body.prompt : "";
       const maxTokensRaw =
-        typeof body.maxTokens === "number" ? body.maxTokens : 192;
+        typeof body.maxTokens === "number" ? body.maxTokens : 500;
       const maxTokens = Math.max(32, Math.min(1024, Math.floor(maxTokensRaw)));
-      return runBenchmark(config, prompt, maxTokens);
+      const language = resolveLanguage(body);
+      return runBenchmark(config, prompt, maxTokens, language);
     }
 
     return runProbe(config);

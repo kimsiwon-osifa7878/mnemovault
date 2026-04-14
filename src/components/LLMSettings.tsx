@@ -84,6 +84,12 @@ function parseSseEvent(block: string): { event: string; data: string } | null {
   return { event, data: dataLines.join("\n") };
 }
 
+function getDefaultStreamBenchmarkPrompt(language: "en" | "ko"): string {
+  return language === "ko"
+    ? "스트리밍 성능에 대해 12개의 짧은 번호 문장을 작성해 주세요. 각 문장은 10~20단어로 간결하고 자연스럽게 써 주세요."
+    : "Write 12 short numbered lines about streaming performance, each line 10 to 20 words.";
+}
+
 export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const {
     provider,
@@ -112,8 +118,8 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
   const [testMessage, setTestMessage] = useState("");
   const [streamProbeStatus, setStreamProbeStatus] = useState<ProbeStatus>("idle");
   const [streamProbeMessage, setStreamProbeMessage] = useState("");
-  const [streamPrompt, setStreamPrompt] = useState(
-    "Write 12 short lines about streaming performance. Keep each line concise and natural."
+  const [streamPrompt, setStreamPrompt] = useState(() =>
+    getDefaultStreamBenchmarkPrompt(language)
   );
   const [streamBenchmark, setStreamBenchmark] = useState<StreamBenchmarkState>(
     createEmptyBenchmarkState()
@@ -225,8 +231,9 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
           model,
           ollamaUrl: nextOllamaUrl,
           contextTokens: nextProvider === "ollama" ? ollamaContextTokens : openrouterContextTokens,
+          language,
           prompt: streamPrompt,
-          maxTokens: 192,
+          maxTokens: 500,
         }),
       });
 
@@ -371,6 +378,17 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
     // fetch helpers are intentionally stable enough for this modal lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, ollamaUrl]);
+
+  useEffect(() => {
+    const enDefault = getDefaultStreamBenchmarkPrompt("en");
+    const koDefault = getDefaultStreamBenchmarkPrompt("ko");
+    setStreamPrompt((current) => {
+      if (!current.trim() || current === enDefault || current === koDefault) {
+        return getDefaultStreamBenchmarkPrompt(language);
+      }
+      return current;
+    });
+  }, [language]);
 
   const handleUrlApply = () => {
     setOllamaUrl(tempUrl);
@@ -670,7 +688,11 @@ export default function LLMSettings({ onClose }: LLMSettingsProps) {
             onChange={(e) => setStreamPrompt(e.target.value)}
             rows={4}
             className="w-full bg-black/30 border border-white/10 rounded px-3 py-2 text-sm text-white/80 placeholder-white/25 focus:outline-none focus:border-amber-400/50 resize-y"
-            placeholder="Enter a prompt for the stream benchmark"
+            placeholder={
+              language === "ko"
+                ? "스트림 벤치마크용 프롬프트를 입력하세요"
+                : "Enter a prompt for the stream benchmark"
+            }
           />
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">

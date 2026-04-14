@@ -12,6 +12,7 @@ export interface LLMConfig {
 export interface LLMCallOptions {
   requireJson?: boolean;
   temperature?: number;
+  think?: boolean;
   signal?: AbortSignal;
 }
 
@@ -401,6 +402,7 @@ async function callOllama(
             { role: "user", content: userMessage },
           ],
           ...(options?.requireJson ? { format: "json" } : {}),
+          ...(typeof options?.think === "boolean" ? { think: options.think } : {}),
           stream: false,
           options: {
             ...(config?.contextTokens && config.contextTokens > 0
@@ -455,6 +457,7 @@ async function* callOllamaStream(
           { role: "user", content: userMessage },
         ],
         ...(options?.requireJson ? { format: "json" } : {}),
+        ...(typeof options?.think === "boolean" ? { think: options.think } : {}),
         stream: true,
         options: {
           ...(config?.contextTokens && config.contextTokens > 0
