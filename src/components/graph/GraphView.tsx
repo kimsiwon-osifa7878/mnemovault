@@ -17,7 +17,7 @@ const NODE_COLORS: Record<string, string> = {
   log: "#94a3b8",
 };
 
-const LEGEND_TYPES = ["concept", "entity", "source", "analysis"] as const;
+const LEGEND_TYPES = ["concept", "entity", "source", "analysis", "index", "log"] as const;
 
 // Stable function references to avoid re-renders from inline arrow functions
 const NODE_CANVAS_MODE = () => "replace" as const;
@@ -32,6 +32,7 @@ interface NodeObject {
   label?: string;
   type?: string;
   linkCount?: number;
+  isOperational?: boolean;
   x?: number;
   y?: number;
 }
@@ -61,6 +62,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [showOperationalNodes, setShowOperationalNodes] = useState(true);
   const [dimensions, setDimensions] = useState({ width: 320, height: 400 });
 
   // Refs to hold latest hover/select state — lets nodeCanvasObject read
@@ -96,10 +98,28 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
 
   // Memoize graph data so react-force-graph-2d receives a stable reference.
   // Only recomputes when the actual node/edge arrays change, NOT on hover/select.
-  const stableGraphData = useMemo(() => ({
-    nodes: graphData.nodes.map((n) => ({ ...n })),
-    links: graphData.edges.map((e) => ({ ...e })),
-  }), [graphData.nodes, graphData.edges]);
+  const filteredGraphData = useMemo(() => {
+    if (showOperationalNodes) return graphData;
+
+    const hiddenNodeIds = new Set(
+      graphData.nodes.filter((node) => node.isOperational).map((node) => node.id)
+    );
+
+    return {
+      nodes: graphData.nodes.filter((node) => !hiddenNodeIds.has(node.id)),
+      edges: graphData.edges.filter(
+        (edge) => !hiddenNodeIds.has(edge.source) && !hiddenNodeIds.has(edge.target)
+      ),
+    };
+  }, [graphData, showOperationalNodes]);
+
+  const stableGraphData = useMemo(
+    () => ({
+      nodes: filteredGraphData.nodes.map((n) => ({ ...n })),
+      links: filteredGraphData.edges.map((e) => ({ ...e })),
+    }),
+    [filteredGraphData.edges, filteredGraphData.nodes]
+  );
 
   // Measure container and respond to resize
   useEffect(() => {
@@ -235,6 +255,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
       const isHovered = hoveredNodeRef.current === id;
 
       const color = NODE_COLORS[type] || "#60a5fa";
+      const isOperational = Boolean(node.isOperational);
 
       // Node radius: base + hub bonus, scaled with zoom
       const radius = Math.max(
@@ -264,7 +285,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
         ctx.shadowColor = color;
         ctx.shadowBlur = 8;
       } else {
-        ctx.fillStyle = color + "cc";
+        ctx.fillStyle = isOperational ? color + "88" : color + "cc";
         ctx.shadowBlur = 0;
       }
       ctx.fill();
@@ -273,7 +294,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
       // Subtle ring
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      ctx.strokeStyle = isSelected ? "#ffffff" : color;
+      ctx.strokeStyle = isSelected ? "#ffffff" : isOperational ? color + "aa" : color;
       ctx.lineWidth = Math.max(0.4, 1 / globalScale);
       ctx.stroke();
 
@@ -312,7 +333,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
     []
   );
 
-  if (graphData.nodes.length === 0) {
+  if (stableGraphData.nodes.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-white/20">
         <svg
@@ -364,6 +385,14 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
         maxZoom={8}
       />
 
+      <button
+        type="button"
+        onClick={() => setShowOperationalNodes((prev) => !prev)}
+        className="absolute top-2 left-2 z-10 rounded border border-white/15 bg-black/50 px-2 py-1 text-[10px] text-white/70 hover:text-white hover:border-white/35"
+      >
+        {showOperationalNodes ? "Hide index/log" : "Show index/log"}
+      </button>
+
       {/* Type legend */}
       <div className="absolute bottom-2 left-2 flex flex-col gap-1 bg-black/50 rounded-md px-2 py-1.5 backdrop-blur-sm pointer-events-none">
         {LEGEND_TYPES.map((type) => (
@@ -372,7 +401,9 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
               className="w-2 h-2 rounded-full"
               style={{ backgroundColor: NODE_COLORS[type] }}
             />
-            <span className="text-[9px] text-white/35 capitalize">{type}</span>
+            <span className="text-[9px] text-white/35 capitalize">
+              {type === "index" || type === "log" ? `${type} (operational)` : type}
+            </span>
           </div>
         ))}
         <div className="h-px bg-white/10 my-1" />
@@ -392,7 +423,7 @@ export default function GraphView({ onNodeClick, resizeToken }: GraphViewProps) 
 
       {/* Node count badge */}
       <div className="absolute top-2 right-2 text-[9px] text-white/20 pointer-events-none">
-        {graphData.nodes.length} nodes · {graphData.edges.length} links
+        {stableGraphData.nodes.length} nodes · {stableGraphData.links.length} links
       </div>
     </div>
   );

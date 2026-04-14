@@ -9,6 +9,12 @@ const STORE_NAME = "handles";
 const HANDLE_KEY = "dirHandle";
 const RESTORE_TIMEOUT_MS = 5000;
 
+declare global {
+  interface Window {
+    __MNEMOVAULT_E2E_DIR_HANDLE__?: FileSystemDirectoryHandle;
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timeoutId = window.setTimeout(() => {
@@ -109,6 +115,20 @@ export const useStorageStore = create<StorageState>((set, get) => ({
 
   restoreFolder: async () => {
     try {
+      const e2eHandle = window.__MNEMOVAULT_E2E_DIR_HANDLE__;
+      if (e2eHandle) {
+        await ensureDirectoryStructure(e2eHandle);
+        const contentHandle = await e2eHandle.getDirectoryHandle("content");
+        set({
+          dirHandle: e2eHandle,
+          contentHandle,
+          isReady: true,
+          folderName: e2eHandle.name,
+          error: null,
+        });
+        return true;
+      }
+
       const handle = await withTimeout(loadHandleFromDB(), RESTORE_TIMEOUT_MS);
       if (!handle) return false;
 

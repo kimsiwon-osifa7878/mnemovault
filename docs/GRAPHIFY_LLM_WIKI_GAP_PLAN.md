@@ -69,9 +69,12 @@
 
 - **mnemovault**: wikilink 기반 기본 노드/엣지 및 이웃 탐색.
 - **graphify**: 커뮤니티 탐지(Leiden), 중심 노드(god nodes), surprising connections 등 분석 리포트.
+- **현재 구현 주의점**: graph view에서 `index`/`log`를 의도적으로 제외하고 있음(`src/lib/wiki/parser.ts`의 `GRAPH_EXCLUDED_SLUGS`).
 
 갭:
 - 위키 그래프를 "보는 것"은 가능하지만 "진단/탐사" 기능이 약함.
+- `llm-wiki` 철학에서 `index.md`/`log.md`는 운영 인터페이스이므로, 기본 그래프에서 완전 제외하면
+  운영 흐름(질문→파일링→유지보수) 가시성이 떨어질 수 있다.
 
 ### E. 멀티모달 범위
 
@@ -99,6 +102,8 @@
 3. **누적 자산 최적화**: 캐시와 증분 업데이트를 통해 “재컴파일 비용”을 최소화한다.
 4. **탐색에서 진단으로**: graph view + graph report(허브/고립/누락 링크)를 함께 제공한다.
 5. **보수적 확장**: 멀티모달은 이번 스프린트에서 제외하고, ingest 실패 격리를 먼저 설계한다.
+6. **운영 인터페이스 가시성 유지**: `index`/`log`는 철학적으로 핵심 페이지이므로 그래프에서 "완전 배제" 대신
+   기본 포함 + 토글(또는 시각적 디엠퍼시스) 정책을 우선 검토한다.
 
 ---
 
@@ -110,6 +115,7 @@
 2. compile pipeline
 3. graph/query consumption
 4. migration/test
+5. graph representation policy (index/log 표시 정책 고정)
 
 ---
 
@@ -204,9 +210,13 @@
 3. lint와 연결
    - lint 결과를 리포트에 병합
    - "다음 유지보수 액션 Top N" 제안
+4. index/log 표현 정책 동기화
+   - graph view, graph report, sidebar가 `index`/`log`를 동일한 정책으로 다루도록 통일
+   - 기본안: 그래프에 포함하되, 별도 색상/크기/필터 토글로 시각적 노이즈를 제어
 
 ### 완료 조건
 - 사용자 질문 없이도 위키 정비 우선순위를 확인 가능.
+- `index`/`log`가 질문 축적과 유지보수 흐름을 보여주는 운영 노드로 해석 가능.
 
 ## Phase 5 — 멀티모달 ingest 확장 (후순위 / out-of-scope)
 
@@ -270,3 +280,28 @@
 - mnemovault의 철학(누적 위키 자산)은 graphify와 정렬되어 있다.
 - 다만 graphify가 강한 지점은 **결정적 추출, 관계 근거 등급화, 증분 캐시, 진단 리포트**다.
 - 따라서 당장 효과가 큰 업그레이드는 **Phase 1(근거 등급화)**와 **Phase 3(해시 기반 증분 컴파일)**이며, 이후 **Phase 2(AST pass)**를 붙이면 LLM wiki 품질/비용/재현성이 함께 개선된다.
+
+---
+
+## 10) v2 그래프 표현 재정렬 실행 플랜 (재정리)
+
+### 목표
+- `index.md`/`log.md`를 그래프에서 완전 제외하지 않고, llm-wiki 운영 인터페이스로 노출한다.
+- 사용자가 필요 시 그래프 노이즈를 줄일 수 있도록 토글 기반 가시성 제어를 제공한다.
+
+### 단계
+1. **파서 정책 변경**
+   - `buildGraphData()`에서 `index`/`log` 하드 제외 로직 제거.
+   - 노드에 `isOperational` 메타를 부여해 UI 계층에서 제어 가능하게 유지.
+2. **그래프 UI 정책 적용**
+   - 기본값은 `index/log 포함`.
+   - 토글로 `index/log 숨김` 가능.
+   - `index/log`는 색상/라벨에서 operational 노드로 구분.
+3. **일관성 체크**
+   - 노드/엣지 카운트가 토글 상태에 맞게 변하는지 검증.
+   - 향후 graph report/sidebar에도 동일 정책을 적용하도록 후속 작업에 연결.
+
+### 수용 기준 (Acceptance Criteria)
+- 기본 그래프에서 `index`/`log` 노드와 관련 엣지가 보인다.
+- 토글 비활성화 시 `index`/`log` 및 해당 엣지가 함께 사라진다.
+- operational 노드는 범례/스타일에서 일반 지식 노드와 구분된다.

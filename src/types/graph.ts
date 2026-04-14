@@ -3,6 +3,7 @@ export interface GraphNode {
   label: string;
   type: string;
   linkCount: number;
+  isOperational?: boolean;
 }
 
 export interface GraphEdge {
