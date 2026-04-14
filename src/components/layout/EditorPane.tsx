@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useWikiStore } from "@/stores/wiki-store";
 import WikiRenderer from "@/components/markdown/WikiRenderer";
@@ -18,12 +18,63 @@ interface EditorPaneProps {
   onDelete?: () => void;
 }
 
+const MIRROR_STYLE_KEYS = [
+  "fontFamily",
+  "fontSize",
+  "lineHeight",
+  "letterSpacing",
+  "tabSize",
+  "whiteSpace",
+  "wordBreak",
+  "fontVariantLigatures",
+] as const;
+
+const CODE_STYLE_KEYS = ["fontFamily", "fontSize", "lineHeight", "letterSpacing"] as const;
+
+function normalizeStyleValue(key: string, value: string): string {
+  const compact = value.trim().toLowerCase();
+  if (key === "fontFamily") {
+    return compact.replace(/["']/g, "").replace(/\s*,\s*/g, ",");
+  }
+  return compact.replace(/\s+/g, " ");
+}
+
+function hasMirrorMismatch(
+  textarea: HTMLElement,
+  textLayer: HTMLElement,
+  pre: HTMLElement,
+  code: HTMLElement
+): boolean {
+  const textareaStyle = window.getComputedStyle(textarea);
+  const textStyle = window.getComputedStyle(textLayer);
+  const codeStyle = window.getComputedStyle(code);
+
+  for (const key of MIRROR_STYLE_KEYS) {
+    if (normalizeStyleValue(key, textareaStyle[key]) !== normalizeStyleValue(key, textStyle[key])) {
+      return true;
+    }
+  }
+
+  for (const key of CODE_STYLE_KEYS) {
+    if (normalizeStyleValue(key, textareaStyle[key]) !== normalizeStyleValue(key, codeStyle[key])) {
+      return true;
+    }
+  }
+
+  const lineHeight = Number.parseFloat(textareaStyle.lineHeight) || 20;
+  const scrollGap = Math.abs(textarea.scrollHeight - pre.scrollHeight);
+  return scrollGap > lineHeight * 1.5;
+}
+
 export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }: EditorPaneProps) {
   const { currentPage, currentSlug, savePage, deletePage, isLoading } =
     useWikiStore();
   const [mode, setMode] = useState<ViewMode>("preview");
   const [editContent, setEditContent] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
+  const [highlightFallbackBySlug, setHighlightFallbackBySlug] = useState<Record<string, true>>({});
+  const editorHostRef = useRef<HTMLDivElement>(null);
+  const isHighlightEnabled = currentSlug ? !highlightFallbackBySlug[currentSlug] : true;
 
   useEffect(() => {
     if (currentPage) {
@@ -58,6 +109,74 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
+
+  useEffect(() => {
+    if (!currentSlug || !isHighlightEnabled || mode === "preview") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const check = async (attempt = 0) => {
+      if ("fonts" in document) {
+        try {
+          await Promise.race([
+            document.fonts.ready,
+            new Promise((resolve) => window.setTimeout(resolve, 250)),
+          ]);
+        } catch {
+          // Ignore fonts API failures; fall back to immediate check.
+        }
+      }
+
+      await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+
+      if (cancelled) return;
+      const host = editorHostRef.current;
+      if (!host) return;
+
+      const textLayer = host.querySelector<HTMLElement>(".w-md-editor-text");
+      const textarea = host.querySelector<HTMLTextAreaElement>(".w-md-editor-text-input");
+      const pre = host.querySelector<HTMLElement>(".w-md-editor-text-pre");
+      const code = host.querySelector<HTMLElement>(".w-md-editor-text-pre > code");
+      if (!textLayer || !textarea || !pre || !code) {
+        if (attempt < 8) {
+          window.setTimeout(() => {
+            void check(attempt + 1);
+          }, 80);
+        }
+        return;
+      }
+
+      const firstMismatch = hasMirrorMismatch(textarea, textLayer, pre, code);
+      if (!firstMismatch) return;
+
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      if (cancelled) return;
+
+      const secondTextLayer = host.querySelector<HTMLElement>(".w-md-editor-text");
+      const secondTextarea = host.querySelector<HTMLTextAreaElement>(".w-md-editor-text-input");
+      const secondPre = host.querySelector<HTMLElement>(".w-md-editor-text-pre");
+      const secondCode = host.querySelector<HTMLElement>(".w-md-editor-text-pre > code");
+      if (!secondTextLayer || !secondTextarea || !secondPre || !secondCode) return;
+
+      if (!hasMirrorMismatch(secondTextarea, secondTextLayer, secondPre, secondCode)) return;
+
+      setHighlightFallbackBySlug((prev) => {
+        if (prev[currentSlug]) return prev;
+        return { ...prev, [currentSlug]: true };
+      });
+    };
+
+    const timer = window.setTimeout(() => {
+      void check();
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [currentSlug, editContent, isHighlightEnabled, mode]);
 
   if (!currentPage) {
     return (
@@ -143,7 +262,13 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {mode === "edit" && (
-          <div className="h-full" data-color-mode="dark">
+          <div
+            ref={editorHostRef}
+            className="h-full md-editor-scope"
+            data-color-mode="dark"
+            data-highlight-mode={isHighlightEnabled ? "on" : "off"}
+            data-testid="md-editor-host"
+          >
             <MDEditor
               value={editContent}
               onChange={(val) => {
@@ -152,6 +277,7 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
               }}
               height="100%"
               preview="edit"
+              highlightEnable={isHighlightEnabled}
               hideToolbar={false}
               className="!bg-[#0a0a0f] !border-none"
             />
@@ -165,7 +291,13 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
         )}
         {mode === "split" && (
           <div className="flex h-full divide-x divide-white/10">
-            <div className="w-1/2 h-full" data-color-mode="dark">
+            <div
+              ref={editorHostRef}
+              className="w-1/2 h-full md-editor-scope"
+              data-color-mode="dark"
+              data-highlight-mode={isHighlightEnabled ? "on" : "off"}
+              data-testid="md-editor-host"
+            >
               <MDEditor
                 value={editContent}
                 onChange={(val) => {
@@ -174,6 +306,7 @@ export default function EditorPane({ backlinks, onLinkClick, onSave, onDelete }:
                 }}
                 height="100%"
                 preview="edit"
+                highlightEnable={isHighlightEnabled}
                 hideToolbar
                 className="!bg-[#0a0a0f] !border-none"
               />

@@ -65,6 +65,25 @@ Open [http://localhost:3000](http://localhost:3000).
 
 > **Browser requirement:** File System Access API requires Chromium-based browsers (Chrome / Edge 86+).
 
+## Testing
+
+```bash
+npm run test
+```
+
+Vitest now uses a project-level `vitest.config.ts` so `@/*` imports resolve the same way in tests as they do in the app build.
+
+In restricted Windows sandbox environments, Vitest can still fail before collection with `spawn EPERM` inside Vite's path resolution. That is an environment limitation, not a known MnemoVault alias issue.
+
+For browser-level graph verification and screenshots, install Playwright's browser binaries once:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+The E2E suite uses a mocked File System Access workspace so it can open `/app`, switch to the Graph tab, and capture screenshots before and after toggling `Hide index/log`. Artifacts are written to `test-results/`.
+
 ## First Run: Choose a Workspace Folder
 
 When entering `/app` for the first time:

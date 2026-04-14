@@ -7,8 +7,7 @@ import type { ClaimResult, EdgeResult } from "@/lib/llm/ingest";
 const WIKILINK_REGEX = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 const EVIDENCE_BLOCK_REGEX = /```mnemovault-evidence\s*([\s\S]*?)```/gi;
 
-/** Slugs excluded from the graph view (catalog / changelog only). */
-const GRAPH_EXCLUDED_SLUGS = new Set(["index", "log"]);
+const OPERATIONAL_GRAPH_SLUGS = new Set(["index", "log"]);
 
 export function parseWikilinks(content: string): WikiLink[] {
   const links: WikiLink[] = [];
@@ -99,7 +98,7 @@ export function parseEvidenceBlock(rawContent: string): {
 }
 
 export function buildGraphData(pages: WikiPage[]): GraphData {
-  const graphPages = pages.filter((p) => !GRAPH_EXCLUDED_SLUGS.has(p.slug));
+  const graphPages = pages;
   const slugSet = new Set(graphPages.map((p) => p.slug));
 
   const nodes: GraphNode[] = graphPages.map((p) => ({
@@ -107,6 +106,10 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
     label: p.frontmatter.title || p.slug,
     type: p.frontmatter.type || "concept",
     linkCount: 0,
+    isOperational:
+      OPERATIONAL_GRAPH_SLUGS.has(p.slug) ||
+      p.frontmatter.type === "index" ||
+      p.frontmatter.type === "log",
   }));
 
   const edgeMap = new Map<string, GraphEdge>();
@@ -136,7 +139,6 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
     const links = parseWikilinks(page.content);
     for (const link of links) {
       const targetSlug = toSlug(link.target);
-      if (GRAPH_EXCLUDED_SLUGS.has(targetSlug)) continue;
       if (slugSet.has(targetSlug)) {
         upsertEdge({ source: page.slug, target: targetSlug });
         const sourceNode = nodes.find((n) => n.id === page.slug);
@@ -150,9 +152,6 @@ export function buildGraphData(pages: WikiPage[]): GraphData {
     for (const edge of evidence.edges) {
       const sourceSlug = toSlug(edge.source_page);
       const targetSlug = toSlug(edge.target_page);
-      if (GRAPH_EXCLUDED_SLUGS.has(sourceSlug) || GRAPH_EXCLUDED_SLUGS.has(targetSlug)) {
-        continue;
-      }
       if (!slugSet.has(sourceSlug) || !slugSet.has(targetSlug)) {
         continue;
       }
