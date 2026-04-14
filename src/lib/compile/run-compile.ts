@@ -17,7 +17,6 @@ import type {
 } from "./types";
 import { normalizeProcessedFilesRecord } from "./processed-files";
 import {
-  appendCompileSessionEvent,
   buildLogEntryEvent,
   createCompileSessionPaths,
 } from "./session-log";
@@ -85,6 +84,7 @@ export async function runCompile(
   const logEnabled = options?.logEnabled ?? true;
   const signal = options?.signal;
   const sessionPaths = logEnabled ? createCompileSessionPaths(startedAt) : null;
+  const sessionEvents: CompileSessionEvent[] = [];
   const fileStatuses = Object.fromEntries(files.map((file) => [file.path, "queued" as const]));
   const progress: CompileProgress = {
     total: files.length,
@@ -100,8 +100,8 @@ export async function runCompile(
     startedAt,
     sessionLogPath: sessionPaths?.jsonlPath,
   };
-  let sessionWriteQueue = Promise.resolve();
   let progressFlushTimer: number | null = null;
+  let fatalError: unknown = null;
 
   const emitProgress = () => {
     onProgress({
@@ -124,15 +124,27 @@ export async function runCompile(
     }, 50);
   };
 
-  const queueSessionEvent = (event: Parameters<typeof appendCompileSessionEvent>[2]) => {
+  const queueSessionEvent = (event: CompileSessionEvent) => {
     if (!sessionPaths) {
       return Promise.resolve();
     }
-    const write = sessionWriteQueue.then(() =>
-      appendCompileSessionEvent(root, sessionPaths.jsonlPath, event)
-    );
-    sessionWriteQueue = write.catch(() => undefined);
-    return write;
+    sessionEvents.push(event);
+    return Promise.resolve();
+  };
+
+  const flushSessionEvents = async () => {
+    if (!sessionPaths || sessionEvents.length === 0) {
+      return;
+    }
+
+    try {
+      const jsonl = `${sessionEvents
+        .map((event) => JSON.stringify(event))
+        .join("\n")}\n`;
+      await writeFile(root, sessionPaths.jsonlPath, jsonl);
+    } catch {
+      // Non-fatal: compile should not fail solely because session log flush failed.
+    }
   };
 
   const markRemainingAsStopped = async (remainingFiles: UncompiledFile[]) => {
@@ -287,13 +299,13 @@ export async function runCompile(
       progress.stoppedAt = Date.now();
     } else {
       progress.status = "error";
-      throw error;
+      fatalError = error;
     }
   }
 
   // Regenerate index.md from all wiki pages
   const successfulResults = progress.results.filter((result) => result.status === "success");
-  if (successfulResults.length > 0) {
+  if (!fatalError && successfulResults.length > 0) {
     try {
       const allWikiFiles = await listFiles(root, "wiki");
       const pages = [];
@@ -310,7 +322,7 @@ export async function runCompile(
   }
 
   // Append to log.md
-  if (logEnabled && successfulResults.length > 0) {
+  if (!fatalError && logEnabled && successfulResults.length > 0) {
     try {
       const logContent = await readFile(root, "wiki/log.md");
       const successResults = successfulResults;
@@ -357,7 +369,7 @@ export async function runCompile(
       },
     });
   }
-  await sessionWriteQueue;
+  await flushSessionEvents();
 
   if (progress.status === "running") {
     progress.status = "done";
@@ -369,6 +381,10 @@ export async function runCompile(
     progressFlushTimer = null;
   }
   emitProgress();
+
+  if (fatalError) {
+    throw fatalError;
+  }
 
   return progress.results;
 }
