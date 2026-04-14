@@ -42,7 +42,7 @@ function IDELayout() {
   const [rightTab, setRightTab] = useState<RightTab>("graph");
   const [backlinks, setBacklinks] = useState<string[]>([]);
   const [rightPanelWidth, setRightPanelWidth] = useState(420);
-  const [ingestFile, setIngestFile] = useState<File | null>(null);
+  const [ingestFiles, setIngestFiles] = useState<File[]>([]);
   const dragModeRef = useRef<"editor" | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
 
@@ -73,12 +73,12 @@ function IDELayout() {
   }, [fetchPages, fetchGraph]);
 
   const handleIngestOpen = useCallback(() => {
-    setIngestFile(null);
+    setIngestFiles([]);
     setShowIngest(true);
   }, []);
 
-  const handleIngestDrop = useCallback((file: File) => {
-    setIngestFile(file);
+  const handleIngestDrop = useCallback((files: File[]) => {
+    setIngestFiles(files);
     setShowIngest(true);
   }, []);
 
@@ -264,10 +264,10 @@ function IDELayout() {
       {/* Modals */}
       {showIngest && (
         <DropZone
-          initialFile={ingestFile}
+          initialFiles={ingestFiles}
           onClose={() => {
             setShowIngest(false);
-            setIngestFile(null);
+            setIngestFiles([]);
           }}
           onComplete={handleIngestComplete}
         />

@@ -9,12 +9,12 @@ import * as clientFs from "@/lib/storage/client-fs";
 interface DropZoneProps {
   onClose: () => void;
   onComplete: () => void;
-  initialFile?: File | null;
+  initialFiles?: File[];
 }
 
-export default function DropZone({ onClose, onComplete, initialFile = null }: DropZoneProps) {
+export default function DropZone({ onClose, onComplete, initialFiles = [] }: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(initialFile);
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [fileType, setFileType] = useState<
     "article" | "paper" | "note" | "data"
   >("article");
@@ -26,6 +26,22 @@ export default function DropZone({ onClose, onComplete, initialFile = null }: Dr
     logEntry: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const mergeUniqueFiles = useCallback((incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setFiles((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}:${f.size}:${f.lastModified}`));
+      const next = [...prev];
+      for (const candidate of incoming) {
+        const key = `${candidate.name}:${candidate.size}:${candidate.lastModified}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          next.push(candidate);
+        }
+      }
+      return next;
+    });
+  }, []);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -48,37 +64,36 @@ export default function DropZone({ onClose, onComplete, initialFile = null }: Dr
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) setFile(droppedFile);
-  }, []);
+    mergeUniqueFiles(Array.from(e.dataTransfer.files || []));
+  }, [mergeUniqueFiles]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0];
-    if (selected) setFile(selected);
+    mergeUniqueFiles(Array.from(e.target.files || []));
+    e.target.value = "";
   };
 
   const handleIngest = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
     setIsIngesting(true);
     setError(null);
 
     try {
       const root = useStorageStore.getState().contentHandle;
       if (!root) throw new Error("Storage not connected");
-
-
-      // Use arrayBuffer to preserve binary files (e.g. PDF) exactly as-is
-      const buffer = await file.arrayBuffer();
-
-      // Save raw file
-      const rawPath = `raw/${fileType}s/${file.name}`;
-      await clientFs.writeFile(root, rawPath, buffer);
+      let lastRawPath = "";
+      for (const file of files) {
+        // Use arrayBuffer to preserve binary files (e.g. PDF) exactly as-is
+        const buffer = await file.arrayBuffer();
+        const rawPath = `raw/${fileType}s/${file.name}`;
+        await clientFs.writeFile(root, rawPath, buffer);
+        lastRawPath = rawPath;
+      }
 
       setResult({
         success: true,
         created: [],
         updated: [],
-        logEntry: `Saved to ${rawPath} (wiki pages not generated; local raw only).`,
+        logEntry: `Saved ${files.length} file(s) to raw/${fileType}s (last: ${lastRawPath}).`,
       });
       onComplete();
     } catch (e) {
@@ -112,21 +127,43 @@ export default function DropZone({ onClose, onComplete, initialFile = null }: Dr
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                 isDragging
                   ? "border-emerald-400 bg-emerald-500/10"
-                  : file
+                  : files.length > 0
                     ? "border-blue-400/50 bg-blue-500/5"
                     : "border-white/10 hover:border-white/20"
               }`}
             >
-              {file ? (
-                <div className="flex items-center justify-center gap-2 text-blue-400">
-                  <FileText className="w-5 h-5" />
-                  <span className="text-sm">{file.name}</span>
+              {files.length > 0 ? (
+                <div className="text-left">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-blue-400">
+                      <FileText className="w-5 h-5" />
+                      <span className="text-sm">{files.length} file(s) selected</span>
+                    </div>
                   <button
-                    onClick={() => setFile(null)}
-                    className="ml-2 text-white/30 hover:text-white/60"
+                    onClick={() => setFiles([])}
+                    className="text-xs text-white/40 hover:text-white/70"
                   >
-                    <X className="w-4 h-4" />
+                      Clear all
                   </button>
+                </div>
+                  <div className="max-h-32 space-y-1 overflow-y-auto rounded border border-white/10 bg-black/20 p-2">
+                    {files.map((f, idx) => (
+                      <div key={`${f.name}-${f.size}-${f.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-white/70">
+                        <span className="truncate">{f.name}</span>
+                        <button
+                          onClick={() => {
+                            setFiles((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            );
+                          }}
+                          className="shrink-0 text-white/35 hover:text-white/70"
+                          aria-label={`Remove ${f.name}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div>
@@ -139,6 +176,7 @@ export default function DropZone({ onClose, onComplete, initialFile = null }: Dr
                         type="file"
                         className="hidden"
                         accept=".md,.txt,.pdf,.json"
+                        multiple
                         onChange={handleFileSelect}
                       />
                     </label>
@@ -188,7 +226,7 @@ export default function DropZone({ onClose, onComplete, initialFile = null }: Dr
               </button>
               <button
                 onClick={handleIngest}
-                disabled={!file || isIngesting}
+                disabled={files.length === 0 || isIngesting}
                 className="px-4 py-1.5 rounded text-sm bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 {isIngesting ? "Processing..." : "Ingest"}

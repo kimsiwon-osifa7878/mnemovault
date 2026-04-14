@@ -19,7 +19,7 @@ import { getUncompiledCount } from "@/lib/compile/get-uncompiled";
 interface SidebarProps {
   onPageSelect: (slug: string) => void;
   onIngestClick: () => void;
-  onIngestDrop: (file: File) => void;
+  onIngestDrop: (files: File[]) => void;
   onNewPage: () => void;
   onSettingsClick?: () => void;
   onStorageClick?: () => void;
@@ -135,8 +135,8 @@ export default function Sidebar({
     e.stopPropagation();
     setIsIngestDragging(false);
     setIsSidebarDragging(false);
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) onIngestDrop(droppedFile);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) onIngestDrop(droppedFiles);
   };
 
   const handleSidebarDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -156,8 +156,8 @@ export default function Sidebar({
     e.preventDefault();
     setIsSidebarDragging(false);
     setIsIngestDragging(false);
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) onIngestDrop(droppedFile);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) onIngestDrop(droppedFiles);
   };
 
   return (
@@ -317,7 +317,7 @@ export default function Sidebar({
           <Upload className="h-4 w-4" />
           <span className="font-medium">Ingest Source</span>
           <span className="text-[10px] text-current/70">
-            Drop a document here to save immediately
+            Drop one or more documents
           </span>
         </button>
       </div>
