@@ -34,16 +34,46 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* MD Editor overrides */
-.w-md-editor {
+/* MD Editor overrides (scoped to editor pane) */
+.md-editor-scope .w-md-editor {
   --color-fg-default: rgba(255, 255, 255, 0.8) !important;
   --color-canvas-default: #0a0a0f !important;
   --color-border-default: rgba(255, 255, 255, 0.1) !important;
 }
 
-.w-md-editor-text-pre > code,
-.w-md-editor-text-input {
+.md-editor-scope .w-md-editor-text,
+.md-editor-scope .w-md-editor-text-pre,
+.md-editor-scope .w-md-editor-text-input,
+.md-editor-scope .w-md-editor-text-pre > code {
   font-family: "IBM Plex Mono", monospace !important;
   font-size: 14px !important;
-  line-height: 1.6 !important;
+  letter-spacing: 0 !important;
+  tab-size: 2 !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  font-variant-ligatures: none !important;
+}
+
+.md-editor-scope .w-md-editor-text {
+  padding: 10px !important;
+}
+
+.md-editor-scope .w-md-editor-text-pre,
+.md-editor-scope .w-md-editor-text > .w-md-editor-text-pre,
+.md-editor-scope .w-md-editor-text-pre > code {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.md-editor-scope .w-md-editor-text-input {
+  padding: inherit !important;
+}
+
+/* Keep token rendering from introducing line metrics drift. */
+.md-editor-scope .w-md-editor-text-pre .token.title,
+.md-editor-scope .w-md-editor-text-pre .token.title.important,
+.md-editor-scope .w-md-editor-text-pre .token.bold {
+  font-size: inherit !important;
+  line-height: inherit !important;
+  font-weight: inherit !important;
 }
