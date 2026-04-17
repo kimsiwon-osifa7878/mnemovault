@@ -1,0 +1,283 @@
+import { NextResponse } from "next/server";
+import { callLLMStream, type LLMConfig } from "@/lib/llm/client";
+import { normalizeLLMError } from "@/lib/llm/errors";
+
+function classifyFailure(error: ReturnType<typeof normalizeLLMError>) {
+  const details = {
+    code: error.code,
+    ...(error.status ? { upstreamStatus: error.status } : {}),
+  };
+
+  if (
+    error.status === 429 ||
+    error.message.toLowerCase().includes("temporarily rate-limited upstream")
+  ) {
+    return {
+      status: "fail" as const,
+      firstChunkReceived: false,
+      rateLimited: true,
+      message: "Rate-limited upstream",
+      details,
+    };
+  }
+
+  if (error.status === 401 || error.status === 403) {
+    return {
+      status: "fail" as const,
+      firstChunkReceived: false,
+      rateLimited: false,
+      message: "Auth failed",
+      details,
+    };
+  }
+
+  if (error.code === "timeout") {
+    return {
+      status: "fail" as const,
+      firstChunkReceived: false,
+      rateLimited: false,
+      message: "Stream timeout",
+      details,
+    };
+  }
+
+  if (error.code === "network_error") {
+    return {
+      status: "fail" as const,
+      firstChunkReceived: false,
+      rateLimited: false,
+      message: "Network error",
+      details,
+    };
+  }
+
+  return {
+    status: "fail" as const,
+    firstChunkReceived: false,
+    rateLimited: false,
+    message: "Stream test failed",
+    details,
+  };
+}
+
+function toSse(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function createConfig(body: Record<string, unknown>): LLMConfig | null {
+  const provider = body.provider === "ollama" ? "ollama" : "openrouter";
+  const model = typeof body.model === "string" ? body.model : "";
+  const ollamaUrl =
+    typeof body.ollamaUrl === "string" ? body.ollamaUrl : undefined;
+  const contextTokens =
+    typeof body.contextTokens === "number" && Number.isFinite(body.contextTokens)
+      ? Math.max(0, Math.floor(body.contextTokens))
+      : undefined;
+
+  if (!model) {
+    return null;
+  }
+
+  return provider === "ollama"
+    ? { provider, model, ollamaUrl, contextTokens }
+    : { provider, model, contextTokens };
+}
+
+type BenchmarkLanguage = "en" | "ko";
+
+function resolveLanguage(body: Record<string, unknown>): BenchmarkLanguage {
+  return body.language === "ko" ? "ko" : "en";
+}
+
+function createPrompt(prompt: string, language: BenchmarkLanguage): { systemPrompt: string; userPrompt: string } {
+  if (language === "ko") {
+    return {
+      systemPrompt:
+        "당신은 스트리밍 지연 벤치마크를 수행 중입니다. 평문으로만 응답하고 마크다운 코드 펜스는 사용하지 마세요.",
+      userPrompt:
+        prompt.trim() ||
+        "스트리밍 성능에 대해 12개의 짧은 번호 문장을 작성해 주세요. 각 문장은 10~20단어로 간결하고 자연스럽게 써 주세요.",
+    };
+  }
+
+  return {
+    systemPrompt:
+      "You are running a streaming latency benchmark. Respond plainly and do not use markdown fences.",
+    userPrompt:
+      prompt.trim() ||
+      "Write 12 short numbered lines about streaming performance, each line 10 to 20 words.",
+  };
+}
+
+async function runProbe(config: LLMConfig) {
+  const startedAt = Date.now();
+  let firstChunk = "";
+
+  for await (const chunk of callLLMStream(
+    "You are a concise assistant.",
+    "Reply with a short greeting.",
+    32,
+    config,
+    { temperature: 0 }
+  )) {
+    if (chunk.text) {
+      firstChunk = chunk.text;
+      break;
+    }
+  }
+
+  if (!firstChunk) {
+    return NextResponse.json({
+      status: "fail",
+      firstChunkReceived: false,
+      message: "Stream timeout",
+      elapsedMs: Date.now() - startedAt,
+    });
+  }
+
+  return NextResponse.json({
+    status: "ok",
+    firstChunkReceived: true,
+    rateLimited: false,
+    message: "Stream OK",
+    elapsedMs: Date.now() - startedAt,
+    details: {
+      preview: firstChunk.slice(0, 80),
+    },
+  });
+}
+
+function runBenchmark(
+  config: LLMConfig,
+  prompt: string,
+  maxTokens: number,
+  language: BenchmarkLanguage
+) {
+  const startedAt = Date.now();
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        let chunkCount = 0;
+        let charCount = 0;
+        let firstChunkElapsedMs: number | null = null;
+        let preview = "";
+        let emittedAnyChunk = false;
+
+        const write = (event: string, data: unknown) => {
+          controller.enqueue(encoder.encode(toSse(event, data)));
+        };
+
+        try {
+          const { systemPrompt, userPrompt } = createPrompt(prompt, language);
+          write("meta", {
+            provider: config.provider,
+            model: config.model,
+            maxTokens,
+            promptPreview: userPrompt.slice(0, 120),
+          });
+
+          for await (const chunk of callLLMStream(
+            systemPrompt,
+            userPrompt,
+            maxTokens,
+            config,
+            {
+              temperature: 0.2,
+              ...(config.provider === "ollama" ? { think: false } : {}),
+            }
+          )) {
+            const text = chunk.text;
+            if (!text) continue;
+
+            chunkCount += 1;
+            charCount += text.length;
+            preview = `${preview}${text}`.slice(-1200);
+            emittedAnyChunk = true;
+
+            const elapsedMs = Date.now() - startedAt;
+            if (firstChunkElapsedMs === null) {
+              firstChunkElapsedMs = elapsedMs;
+            }
+
+            write("chunk", {
+              text,
+              chunkCount,
+              charCount,
+              elapsedMs,
+            });
+          }
+
+          const elapsedMs = Date.now() - startedAt;
+          write("complete", {
+            elapsedMs,
+            chunkCount,
+            charCount,
+            firstChunkElapsedMs,
+            preview,
+            message: emittedAnyChunk
+              ? "Stream benchmark complete"
+              : "Benchmark completed but no stream text was emitted",
+          });
+        } catch (error) {
+          const normalized = normalizeLLMError(error);
+          write("error", {
+            elapsedMs: Date.now() - startedAt,
+            code: normalized.code,
+            retryable: normalized.retryable,
+            error: normalized.message,
+            ...(normalized.status ? { upstreamStatus: normalized.status } : {}),
+          });
+        } finally {
+          controller.close();
+        }
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    }
+  );
+}
+
+export async function POST(request: Request) {
+  const startedAt = Date.now();
+
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const mode = body.mode === "stream" ? "stream" : "probe";
+    const config = createConfig(body);
+
+    if (!config) {
+      return NextResponse.json({
+        status: "fail",
+        firstChunkReceived: false,
+        message: "model is required",
+        elapsedMs: Date.now() - startedAt,
+      });
+    }
+
+    if (mode === "stream") {
+      const prompt =
+        typeof body.prompt === "string" ? body.prompt : "";
+      const maxTokensRaw =
+        typeof body.maxTokens === "number" ? body.maxTokens : 500;
+      const maxTokens = Math.max(32, Math.min(1024, Math.floor(maxTokensRaw)));
+      const language = resolveLanguage(body);
+      return runBenchmark(config, prompt, maxTokens, language);
+    }
+
+    return runProbe(config);
+  } catch (error) {
+    const normalized = normalizeLLMError(error);
+    const failure = classifyFailure(normalized);
+    return NextResponse.json({
+      ...failure,
+      elapsedMs: Date.now() - startedAt,
+    });
+  }
+}
